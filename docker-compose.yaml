@@ -9,7 +9,7 @@ services:
     working_dir: /workspace/ui
     restart: unless-stopped
     environment:
-      LUNA_SSO_URL: ${LUNA_SSO_URL:?Set LUNA_SSO_URL to Luna Sentia's public sign-on address}
+      LUNA_SSO_URL: ${LUNA_SSO_URL:-http://localhost:19090}
       LUNA_SSO_INTERNAL_URL: ${LUNA_SSO_INTERNAL_URL:-http://luna-sentia-auth:8000}
       DATABASE_URL: postgresql://lunasocia:${POSTGRES_PASSWORD:-lunasocia-dev}@luna-sentia-db:5432/lunasocia
       UI_PUBLIC_URL: ${UI_PUBLIC_URL:-http://localhost:18507}
