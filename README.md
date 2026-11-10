@@ -1,0 +1,58 @@
+# Luna Socia
+
+The owner's private chat with Luna: text, voice messages, photos, and pictures of Luna.
+Socia is one service (`ui`): the chat page and its API, behind Luna's single sign-on, for
+the owner only. Its models run in Luna Sentia, which every Luna app shares.
+
+| Part | Model | Where it runs |
+| --- | --- | --- |
+| Chat | `LUNASOCIA_CHAT_MODEL` (default `qwen3:14b`, about 9.6 GB with 8k context) | Sentia's Ollama, through its monitor, on the GPU |
+| Photos sent to Luna | `LUNASOCIA_VISION_MODEL` (default `qwen3-vl:8b-instruct`) describes them for her | Sentia's Ollama, on the GPU |
+| Pictures of Luna | Qwen-Image 2.1 Turbo, 8 steps; her profile picture is the face reference | Sentia's ComfyUI, on the GPU |
+| Voice messages | faster-whisper `LUNASOCIA_STT_MODEL` (default `large-v3-turbo`, int8) | Here, on the CPU |
+| Her voice | Kokoro 82M, voice `LUNASOCIA_TTS_VOICE` (default `af_heart`) | Here, on the CPU |
+
+## How a turn works
+
+1. What you send is stored in the `lunasocia` database. A photo is first described by the
+   vision model; Luna reads that description in brackets, which is how she "sees" it.
+2. Luna's reply streams from the chat model, with her persona (`ui/app/persona.py`) and the
+   last 40 messages. Her own looks, described once from her profile picture, are part of it.
+3. When a picture fits (you ask for a selfie, or for her to step into your photo), she calls
+   her `create_image` tool. Socia unloads every Ollama model, sends ComfyUI the Qwen-Image
+   2.1 workflow (`ui/app/images.py`) with her profile picture and, if asked, your last photo
+   as references, then has ComfyUI free its model again.
+
+Measured on an RTX 5070 (12 GB): a reply starts in about 0.3 s once the chat model is
+loaded (about 25 s to load it); a picture takes about 40 s; her voice about 0.4 s per
+reply; a 4-second voice message about 4 s to transcribe.
+
+## Start
+
+Luna Sentia must be running, with `qwen3:14b` in its `SENTIA_MODELS`, its ComfyUI and
+image-model download, and `LUNASOCIA_DB_PASSWORD` set (Sentia creates the `lunasocia`
+role and database).
+
+```bash
+cp .env.example .env    # then fill it in
+../Luna_Sentia/luna.sh start socia
+```
+
+Open it at `UI_PUBLIC_URL`: route that address to `127.0.0.1:18507` in the tunnel, under
+`SENTIA_AUTH_COOKIE_DOMAIN`, so the sign-in cookie reaches it. Set Luna's profile picture
+from the menu on her avatar: it becomes her face in every picture she takes.
+
+## Data
+
+The `luna_socia_data` volume holds her profile picture (`/data/luna`), the pictures and
+photos of the conversation (`/data/images`), and the voice models, downloaded the first
+time they are used (`/data/models`). "Start the conversation over" in the menu deletes the
+messages and their pictures, and keeps her profile picture.
+
+## Tests
+
+```bash
+docker compose build ui
+docker run --rm --network none --entrypoint python -v "$PWD/ui/tests:/workspace/ui/tests:ro" \
+  ghcr.io/pranjallk1995/luna-socia-ui:v0.1.0 -m unittest discover -s tests
+```

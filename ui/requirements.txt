@@ -1,0 +1,11 @@
+starlette==1.10.0
+uvicorn==0.54.0
+httpx==0.28.1
+python-multipart==0.0.33
+psycopg[binary]==3.2.10
+pillow==12.1.0
+faster-whisper==1.2.1
+kokoro-onnx==0.6.1
+soundfile==0.14.0
+# faster-whisper passes av.open(metadata_errors=...), which PyAV 16+ no longer accepts.
+av==15.1.0

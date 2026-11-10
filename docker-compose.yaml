@@ -1,0 +1,53 @@
+services:
+  # Luna Socia: the owner's chat with Luna by text, voice and pictures. Her chat and
+  # vision models come from Luna Sentia's Ollama (through its monitor), her pictures from
+  # Sentia's ComfyUI; voice runs here on the CPU. The conversation is in the lunasocia
+  # database, the pictures, her profile picture and the voice models on the data volume.
+  ui:
+    build: ./ui
+    image: ghcr.io/pranjallk1995/luna-socia-ui:${LUNA_IMAGE_TAG:-v0.1.0}
+    working_dir: /workspace/ui
+    restart: unless-stopped
+    environment:
+      LUNA_SSO_URL: ${LUNA_SSO_URL:?Set LUNA_SSO_URL to Luna Sentia's public sign-on address}
+      LUNA_SSO_INTERNAL_URL: ${LUNA_SSO_INTERNAL_URL:-http://luna-sentia-auth:8000}
+      DATABASE_URL: postgresql://lunasocia:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to LUNASOCIA_DB_PASSWORD from Luna_Sentia/.env}@luna-sentia-db:5432/lunasocia
+      UI_PUBLIC_URL: ${UI_PUBLIC_URL:-http://localhost:18507}
+      LUNASOCIA_CHAT_MODEL: ${LUNASOCIA_CHAT_MODEL:-qwen3:14b}
+      LUNASOCIA_VISION_MODEL: ${LUNASOCIA_VISION_MODEL:-qwen3-vl:8b-instruct}
+      # Must equal SENTIA_RESIDENT_CONTEXT, or Ollama reloads her model for every reply.
+      LUNASOCIA_CONTEXT_TOKENS: ${LUNASOCIA_CONTEXT_TOKENS:-8192}
+      LUNASOCIA_STT_MODEL: ${LUNASOCIA_STT_MODEL:-large-v3-turbo}
+      LUNASOCIA_TTS_VOICE: ${LUNASOCIA_TTS_VOICE:-af_heart}
+      TZ: Asia/Kolkata
+    volumes:
+      - socia_data:/data
+    ports:
+      - "127.0.0.1:18507:8501"
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./ui/app
+          target: /workspace/ui/app
+        - action: rebuild
+          path: ./ui/requirements.txt
+        - action: rebuild
+          path: ./ui/Dockerfile
+    networks:
+      sentia_network:
+        aliases:
+          - luna-socia-ui
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  socia_data:
+    name: luna_socia_data
+
+networks:
+  sentia_network:
+    external: true
+    name: luna_sentia_network

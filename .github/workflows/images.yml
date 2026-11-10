@@ -1,0 +1,30 @@
+# Test and publish this repository's images; the steps are shared in Luna Sentia's
+# service-images.yml. A release tag publishes every service under its version.
+name: Images
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "ui/**"
+      - ".github/workflows/images.yml"
+  # A release tag that predates this workflow can be published by naming it here.
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Release tag to publish images for, like v1.4.0 (blank rebuilds latest)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  images:
+    uses: pranjallk1995/Luna_Sentia/.github/workflows/service-images.yml@main
+    with:
+      app: socia
+      services: '["ui"]'
+      release: ${{ inputs.release }}
