@@ -44,3 +44,19 @@ The chat model stays resident on the GPU, so it must fit there at
 `SENTIA_RESIDENT_CONTEXT`: run Luna Sentia's `model_checks/check_model.py <model>
 --context 8192` first. Photo descriptions (`LUNASOCIA_VISION_MODEL`) are not scored
 here; check a few photos by hand after changing that model.
+
+## Comparing a prompt change
+
+The same scenarios check a change to Luna's prompt (`ui/app/persona.py`) with the same
+model: copy the changed `ui/app` into the container and put it on `PYTHONPATH` for the
+`new` run only, then score it against an `old.jsonl` made with the current prompt.
+
+```sh
+docker exec $C mkdir -p /tmp/socia_eval/code
+docker cp ui/app $C:/tmp/socia_eval/code/app
+docker exec -e PYTHONPATH=/tmp/socia_eval/code $C python /tmp/socia_eval/run.py new qwen3:14b /tmp/socia_eval/new.jsonl
+```
+
+The 0.1.1 prompt was checked this way against 0.1.0, on `qwen3:14b`: replies in Hindi to a
+Hindi message went from 0 of 3 to 3 of 3, she stopped writing code when asked for it, and
+every `create_image` call stayed right (42 of 42).
