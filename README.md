@@ -22,6 +22,15 @@ the owner only. Its models run in Luna Sentia, which every Luna app shares.
 | Voice messages | faster-whisper `LUNASOCIA_STT_MODEL` (default `large-v3-turbo`, int8) | Here, on the CPU | A few voice messages by hand |
 | Her voice | Kokoro 82M, voice `LUNASOCIA_TTS_VOICE` (default `af_heart`) | Here, on the CPU | Listen to a few replies |
 
+## Luna ecosystem
+
+![Luna ecosystem architecture](docs/luna-ecosystem.svg)
+
+Socia is one service, with no MCP server, on Luna Sentia's `luna_sentia_network`. It signs
+in through Sentia's `auth`, keeps its messages in Sentia's PostgreSQL (`lunasocia`), sends
+chat and photo calls through Sentia's model monitor to Ollama, and asks Sentia's ComfyUI for
+pictures. It is not on Luna Unia's home page yet.
+
 ## How a turn works
 
 1. What you send is stored in the `lunasocia` database. A photo is first described by the
