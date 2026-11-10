@@ -1,16 +1,26 @@
 # Luna Socia
 
+![Status: early prototype](https://img.shields.io/badge/Status-early_prototype-D73A49)
+
+> **Work in progress:** Luna Socia is an early prototype. Luna's voice still comes from a
+> prompt alone; the fine-tuned model, links to the other Luna apps, and long-term memory
+> are next.
+
+> **Requires Luna Sentia, running and healthy:** Socia's chat, vision and image models
+> run in [Luna Sentia](https://github.com/pranjallk1995/Luna_Sentia), and its data is in
+> Sentia's PostgreSQL. Start Sentia first, as described under [Start](#start).
+
 The owner's private chat with Luna: text, voice messages, photos, and pictures of Luna.
 Socia is one service (`ui`): the chat page and its API, behind Luna's single sign-on, for
 the owner only. Its models run in Luna Sentia, which every Luna app shares.
 
-| Part | Model | Where it runs |
-| --- | --- | --- |
-| Chat | `LUNASOCIA_CHAT_MODEL` (default `qwen3:14b`, about 9.6 GB with 8k context) | Sentia's Ollama, through its monitor, on the GPU |
-| Photos sent to Luna | `LUNASOCIA_VISION_MODEL` (default `qwen3-vl:8b-instruct`) describes them for her | Sentia's Ollama, on the GPU |
-| Pictures of Luna | Qwen-Image 2.1 Turbo, 8 steps; her profile picture is the face reference | Sentia's ComfyUI, on the GPU |
-| Voice messages | faster-whisper `LUNASOCIA_STT_MODEL` (default `large-v3-turbo`, int8) | Here, on the CPU |
-| Her voice | Kokoro 82M, voice `LUNASOCIA_TTS_VOICE` (default `af_heart`) | Here, on the CPU |
+| Part | Model | Where it runs | Before changing it |
+| --- | --- | --- | --- |
+| Chat | `LUNASOCIA_CHAT_MODEL` (default `qwen3:14b`, about 9.6 GB with 8k context) | Sentia's Ollama, through its monitor, on the GPU | Compare it with [`model_evaluations/`](model_evaluations/README.md) and check it fits with Sentia's `model_checks/check_model.py --context 8192` |
+| Photos sent to Luna | `LUNASOCIA_VISION_MODEL` (default `qwen3-vl:8b-instruct`) describes them for her | Sentia's Ollama, on the GPU | Sentia's `model_checks/check_model.py`, then a few photos by hand |
+| Pictures of Luna | Qwen-Image 2.1 Turbo, 8 steps; her profile picture is the face reference | Sentia's ComfyUI, on the GPU | A few pictures by hand |
+| Voice messages | faster-whisper `LUNASOCIA_STT_MODEL` (default `large-v3-turbo`, int8) | Here, on the CPU | A few voice messages by hand |
+| Her voice | Kokoro 82M, voice `LUNASOCIA_TTS_VOICE` (default `af_heart`) | Here, on the CPU | Listen to a few replies |
 
 ## How a turn works
 
@@ -48,6 +58,17 @@ The `luna_socia_data` volume holds her profile picture (`/data/luna`), the pictu
 photos of the conversation (`/data/images`), and the voice models, downloaded the first
 time they are used (`/data/models`). "Start the conversation over" in the menu deletes the
 messages and their pictures, and keeps her profile picture.
+
+## Changing a model
+
+Before changing `LUNASOCIA_CHAT_MODEL`, compare the new model with the current one:
+[`model_evaluations/`](model_evaluations/README.md) answers a fixed set of made-up
+conversations with both, through Socia's own prompt and `create_image` tool, and
+scores her texting style, her language, whether she calls `create_image` when (and
+only when) a picture is asked for, and time. The chat model stays resident, so check
+that it fits with Luna Sentia's `model_checks/check_model.py <model> --context 8192`;
+the full list of checks is in Sentia's
+[Changing a model](https://github.com/pranjallk1995/Luna_Sentia#changing-a-model).
 
 ## Tests
 

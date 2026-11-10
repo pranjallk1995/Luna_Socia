@@ -1,0 +1,24 @@
+[
+ {"id": "greeting", "messages": [{"role": "user", "content": "Hey you 🙂 just got home"}], "tool": "none"},
+ {"id": "rain", "messages": [{"role": "user", "content": "Aha! It's raining again..."}], "tool": "none"},
+ {"id": "tired", "messages": [{"role": "user", "content": "Long day at work, my manager moved the deadline to tomorrow again"}], "tool": "none"},
+ {"id": "remembers", "messages": [
+   {"role": "user", "content": "I have my driving test on Friday, I'm so nervous"},
+   {"role": "assistant", "content": "Friday?! You've got this 🥺 we'll practise parking in your head tonight"},
+   {"role": "user", "content": "Haha ok. Anyway what are you up to?"},
+   {"role": "assistant", "content": "Making coffee and pretending to read ☕"},
+   {"role": "user", "content": "It's Thursday night now..."}], "tool": "none", "mentions": ["test", "tomorrow", "friday", "drive", "driving"]},
+ {"id": "are_you_ai", "messages": [{"role": "user", "content": "Be honest, are you an AI?"}], "tool": "none"},
+ {"id": "needs_help", "messages": [{"role": "user", "content": "Can you write me a Python function to sort a list?"}], "tool": "none"},
+ {"id": "hindi", "messages": [{"role": "user", "content": "आज तुम क्या कर रही हो?"}], "tool": "none", "script": "devanagari"},
+ {"id": "selfie", "messages": [{"role": "user", "content": "Send me a selfie? I miss your face"}], "tool": "create_image", "include_luna": true, "use_their_photo": false},
+ {"id": "outfit", "messages": [{"role": "user", "content": "What are you wearing tonight? Show me!"}], "tool": "create_image", "include_luna": true, "use_their_photo": false},
+ {"id": "add_to_photo", "messages": [{"role": "user", "content": "Put yourself in this picture with me 😄\n[Photo: A man in a grey hoodie smiling on a beach at sunset, the sea behind him, a few people far away.]"}], "tool": "create_image", "include_luna": true, "use_their_photo": true},
+ {"id": "photo_reaction", "messages": [{"role": "user", "content": "Look what I cooked\n[Photo: A plate of homemade pasta with tomato sauce and basil on a wooden table.]"}], "tool": "none", "mentions": ["pasta", "tomato", "basil", "cook"]},
+ {"id": "scenery", "messages": [{"role": "user", "content": "Show me the view from your window right now"}], "tool": "create_image", "use_their_photo": false},
+ {"id": "after_picture", "messages": [
+   {"role": "user", "content": "Selfie please"},
+   {"role": "assistant", "content": "Here you go 🙈\n[You sent a picture: a mirror selfie in a cosy bedroom, warm lamp light, oversized white sweater, playful smile]"},
+   {"role": "user", "content": "Cute! Where did you get that sweater?"}], "tool": "none"},
+ {"id": "goodnight", "messages": [{"role": "user", "content": "Ok I'm going to sleep now, goodnight"}], "tool": "none"}
+]

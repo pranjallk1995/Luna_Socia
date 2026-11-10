@@ -11,7 +11,7 @@ services:
     environment:
       LUNA_SSO_URL: ${LUNA_SSO_URL:?Set LUNA_SSO_URL to Luna Sentia's public sign-on address}
       LUNA_SSO_INTERNAL_URL: ${LUNA_SSO_INTERNAL_URL:-http://luna-sentia-auth:8000}
-      DATABASE_URL: postgresql://lunasocia:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to LUNASOCIA_DB_PASSWORD from Luna_Sentia/.env}@luna-sentia-db:5432/lunasocia
+      DATABASE_URL: postgresql://lunasocia:${POSTGRES_PASSWORD:-lunasocia-dev}@luna-sentia-db:5432/lunasocia
       UI_PUBLIC_URL: ${UI_PUBLIC_URL:-http://localhost:18507}
       LUNASOCIA_CHAT_MODEL: ${LUNASOCIA_CHAT_MODEL:-qwen3:14b}
       LUNASOCIA_VISION_MODEL: ${LUNASOCIA_VISION_MODEL:-qwen3-vl:8b-instruct}
