@@ -88,8 +88,8 @@ password `lunasocia-dev`, which is Socia's default too.
 ../Luna_Sentia/luna.sh start socia
 ```
 
-Open it at http://localhost:18507 and sign in as the owner. With a tunnel, copy
-`.env.example` to `.env`, set `UI_PUBLIC_URL`, and route that address to `127.0.0.1:18507`,
+Open it at http://localhost:18503 and sign in as the owner. With a tunnel, copy
+`.env.example` to `.env`, set `UI_PUBLIC_URL`, and route that address to `127.0.0.1:18503`,
 under `SENTIA_AUTH_COOKIE_DOMAIN`, so the sign-in cookie reaches it. Choose a girlfriend, or create
 one: her profile picture becomes her face in every picture she takes.
 

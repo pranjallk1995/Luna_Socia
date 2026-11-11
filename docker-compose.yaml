@@ -9,10 +9,10 @@ services:
     working_dir: /workspace/ui
     restart: unless-stopped
     environment:
-      LUNA_SSO_URL: ${LUNA_SSO_URL:-http://localhost:19090}
+      LUNA_SSO_URL: ${LUNA_SSO_URL:-http://localhost:19001}
       LUNA_SSO_INTERNAL_URL: ${LUNA_SSO_INTERNAL_URL:-http://luna-sentia-auth:8000}
       DATABASE_URL: postgresql://lunasocia:${POSTGRES_PASSWORD:-lunasocia-dev}@luna-sentia-db:5432/lunasocia
-      UI_PUBLIC_URL: ${UI_PUBLIC_URL:-http://localhost:18507}
+      UI_PUBLIC_URL: ${UI_PUBLIC_URL:-http://localhost:18503}
       LUNASOCIA_CHAT_MODEL: ${LUNASOCIA_CHAT_MODEL:-huihui_ai/qwen3-abliterated:14b}
       LUNASOCIA_VISION_MODEL: ${LUNASOCIA_VISION_MODEL:-qwen3-vl:8b-instruct}
       # Must equal SENTIA_RESIDENT_CONTEXT, or Ollama reloads her model for every reply.
@@ -24,7 +24,7 @@ services:
     volumes:
       - socia_data:/data
     ports:
-      - "127.0.0.1:18507:8501"
+      - "127.0.0.1:18503:8501"
     develop:
       watch:
         - action: sync+restart
