@@ -13,7 +13,7 @@ services:
       LUNA_SSO_INTERNAL_URL: ${LUNA_SSO_INTERNAL_URL:-http://luna-sentia-auth:8000}
       DATABASE_URL: postgresql://lunasocia:${POSTGRES_PASSWORD:-lunasocia-dev}@luna-sentia-db:5432/lunasocia
       UI_PUBLIC_URL: ${UI_PUBLIC_URL:-http://localhost:18507}
-      LUNASOCIA_CHAT_MODEL: ${LUNASOCIA_CHAT_MODEL:-qwen3:14b}
+      LUNASOCIA_CHAT_MODEL: ${LUNASOCIA_CHAT_MODEL:-huihui_ai/qwen3-abliterated:14b}
       LUNASOCIA_VISION_MODEL: ${LUNASOCIA_VISION_MODEL:-qwen3-vl:8b-instruct}
       # Must equal SENTIA_RESIDENT_CONTEXT, or Ollama reloads her model for every reply.
       LUNASOCIA_CONTEXT_TOKENS: ${LUNASOCIA_CONTEXT_TOKENS:-8192}

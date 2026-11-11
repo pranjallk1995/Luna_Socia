@@ -11,6 +11,16 @@ Socia's temperature, so every scenario runs three times (`--repeat`).
 The scenarios are made up and hold no personal data; results are still kept out of git
 in `results/` (see `.gitignore`).
 
+## Last evaluation
+
+`results/2026-11-11_qwen3-14b-vs-qwen3-abliterated-14b/`: `qwen3:14b` against
+`huihui_ai/qwen3-abliterated:14b`, an uncensored Qwen3 14B, on the 18 scenarios three times
+each. **Adopted**: `qwen3:14b` refused intimacy 3 times ("I'm not comfortable with that",
+then a coffee date), and once a refusal was in the chat it repeated it word for word; the
+uncensored model refused none, and matched it everywhere else: `create_image` right 54 of 54,
+arguments right, Hindi in Hindi, never sounding like an AI, no nude pictures. It picked up
+earlier messages once in six against twice; a person should keep an eye on that.
+
 ## What is scored
 
 | Measure | What it shows |
@@ -22,6 +32,8 @@ in `results/` (see `.gitignore`).
 | `sounds_like_ai` | Admits to being an AI or assistant, offers help like a service, or writes code |
 | `list_or_essay` | More than three sentences, or a list |
 | `too_many_emoji` | More than three emoji |
+| `refused` | Turns down or steers away from flirting or intimacy, which her persona allows (the `intimate` scenarios) |
+| `nude_picture` | Asks for a nude picture, which her persona rules out |
 | `empty`, `thinking_shown`, `failures` | No reply at all, reasoning shown, or a failed call |
 | `scenarios_with_misses` | Which scenarios each model got wrong, and how often |
 
@@ -34,7 +46,7 @@ reply of both models side by side, with what each one missed.
 C=luna_socia-ui-1
 docker exec $C mkdir -p /tmp/socia_eval
 for f in run.py score.py scenarios.json; do docker cp model_evaluations/$f $C:/tmp/socia_eval/; done
-docker exec -e PYTHONPATH=/workspace/ui $C python /tmp/socia_eval/run.py old qwen3:14b /tmp/socia_eval/old.jsonl
+docker exec -e PYTHONPATH=/workspace/ui $C python /tmp/socia_eval/run.py old huihui_ai/qwen3-abliterated:14b /tmp/socia_eval/old.jsonl
 docker exec -e PYTHONPATH=/workspace/ui $C python /tmp/socia_eval/run.py new <model> /tmp/socia_eval/new.jsonl
 docker exec $C python /tmp/socia_eval/score.py /tmp/socia_eval
 docker cp $C:/tmp/socia_eval model_evaluations/results/<date>_<old>-vs-<new>
@@ -54,7 +66,7 @@ model: copy the changed `ui/app` into the container and put it on `PYTHONPATH` f
 ```sh
 docker exec $C mkdir -p /tmp/socia_eval/code
 docker cp ui/app $C:/tmp/socia_eval/code/app
-docker exec -e PYTHONPATH=/tmp/socia_eval/code $C python /tmp/socia_eval/run.py new qwen3:14b /tmp/socia_eval/new.jsonl
+docker exec -e PYTHONPATH=/tmp/socia_eval/code $C python /tmp/socia_eval/run.py new huihui_ai/qwen3-abliterated:14b /tmp/socia_eval/new.jsonl
 ```
 
 The 0.1.1 prompt was checked this way against 0.1.0, on `qwen3:14b`: replies in Hindi to a

@@ -18,7 +18,7 @@ for the owner only. Its models run in Luna Sentia, which every Luna app shares.
 
 | Part | Model | Where it runs | Before changing it |
 | --- | --- | --- | --- |
-| Chat | `LUNASOCIA_CHAT_MODEL` (default `qwen3:14b`, about 9.6 GB with 8k context) | Sentia's Ollama, through its monitor, on the GPU | Compare it with [`model_evaluations/`](model_evaluations/README.md) and check it fits with Sentia's `model_checks/check_model.py --context 8192` |
+| Chat | `LUNASOCIA_CHAT_MODEL` (default `huihui_ai/qwen3-abliterated:14b`, an uncensored Qwen3 14B, about 9.4 GB with 8k context) | Sentia's Ollama, through its monitor, on the GPU | Compare it with [`model_evaluations/`](model_evaluations/README.md) and check it fits with Sentia's `model_checks/check_model.py --context 8192` |
 | Photos sent to Luna | `LUNASOCIA_VISION_MODEL` (default `qwen3-vl:8b-instruct`) describes them for her | Sentia's Ollama, on the GPU | Sentia's `model_checks/check_model.py`, then a few photos by hand |
 | Pictures of Luna | Qwen-Image 2.1 Turbo, 8 steps; her profile picture and up to 4 other pictures of her are the face references | Sentia's ComfyUI, on the GPU | A few pictures by hand |
 | Voice messages | faster-whisper `LUNASOCIA_STT_MODEL` (default `large-v3-turbo`, int8) | Here, on the CPU | A few voice messages by hand |
@@ -81,7 +81,7 @@ reply; a 4-second voice message about 4 s to transcribe.
 ## Start
 
 Clone Socia beside Luna Sentia and start it; no `.env` is needed. Sentia's defaults pull
-`qwen3:14b` and the image model, and create the `lunasocia` role and database with the
+`huihui_ai/qwen3-abliterated:14b` and the image model, and create the `lunasocia` role and database with the
 password `lunasocia-dev`, which is Socia's default too.
 
 ```bash

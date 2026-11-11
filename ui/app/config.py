@@ -49,7 +49,7 @@ class SociaConfig:
     public_url: str
     ollama_url: str = "http://luna-sentia-ollama:11434"
     comfyui_url: str = "http://luna-sentia-comfyui:8188"
-    chat_model: str = "qwen3:14b"
+    chat_model: str = "huihui_ai/qwen3-abliterated:14b"
     vision_model: str = "qwen3-vl:8b-instruct"
     # 8k holds the last 40 short messages and leaves room on the GPU; it must equal
     # SENTIA_RESIDENT_CONTEXT, or Ollama reloads the model for every reply.
