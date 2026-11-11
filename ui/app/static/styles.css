@@ -199,6 +199,8 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-picture { display: block; max-width: 100%; width: 20rem; border-radius: 1rem; margin-bottom: 0.25rem; cursor: zoom-in; background: var(--lv-control); }
 .sc-meta { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.15rem; color: var(--lv-muted); font-size: 0.68rem; }
 .sc-play { padding: 0; border: 0; background: none; color: var(--lv-muted); cursor: pointer; font-size: 0.68rem; text-decoration: underline; }
+a.sc-play { text-decoration: underline; }
+.sc-lightbox-save { position: fixed; bottom: 1.25rem; left: 50%; transform: translateX(-50%); padding: 0.5rem 1.1rem; border-radius: 999px; background: var(--lv-panel, #222); color: var(--lv-text, #fff); text-decoration: none; font-size: var(--luna-text-small, 0.85rem); }
 .sc-delete { opacity: 0; transition: opacity 0.15s; }
 .sc-message:hover .sc-delete, .sc-message:focus-within .sc-delete { opacity: 1; }
 .sc-delete:hover { color: var(--sc-bad); }

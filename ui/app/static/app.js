@@ -534,6 +534,10 @@ function lightbox(url) {
   const box = document.createElement("div");
   box.className = "sc-lightbox";
   box.append(Object.assign(document.createElement("img"), { src: url, alt: "Picture" }));
+  const save = Object.assign(document.createElement("a"), {
+    className: "sc-lightbox-save", href: `${url}?download=1`, textContent: "Download" });
+  save.addEventListener("click", (event) => event.stopPropagation());
+  box.append(save);
   box.addEventListener("click", () => box.remove());
   document.body.append(box);
 }
@@ -565,6 +569,15 @@ function meta(message) {
     play.textContent = "play";
     play.addEventListener("click", () => speak(message.id));
     line.append(play);
+  }
+  if (message.image_url) {
+    // Her pictures and your photos, saved as files with the date in their name.
+    const save = document.createElement("a");
+    save.className = "sc-play";
+    save.href = `${message.image_url}?download=1`;
+    save.textContent = "download";
+    save.setAttribute("aria-label", "Download this picture");
+    line.append(save);
   }
   if (message.id) {
     const remove = document.createElement("button");

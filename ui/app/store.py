@@ -264,7 +264,10 @@ class SociaStore:
 
     def image(self, image_id: int) -> dict[str, Any] | None:
         with self.connect() as db:
-            return db.execute("SELECT * FROM images WHERE id = %s", (image_id,)).fetchone()
+            # With the name of the girlfriend whose chat it is in, for naming a download.
+            return db.execute("SELECT i.*, co.name AS companion_name FROM images i "
+                              "LEFT JOIN chats c ON c.id = i.chat_id LEFT JOIN companions co ON co.id = c.companion_id "
+                              "WHERE i.id = %s", (image_id,)).fetchone()
 
     def add_message(self, chat_id: int, role: str, content: str, image_id: int | None = None,
                     photo_note: str | None = None) -> dict[str, Any]:

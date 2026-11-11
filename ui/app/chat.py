@@ -6,6 +6,7 @@ import asyncio
 import io
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime
@@ -23,6 +24,11 @@ from app.store import SociaStore
 logger = logging.getLogger("socia")
 # Photos are kept at most this size on their longer side; the image model uses about 1024.
 PHOTO_MAX_SIDE = 2048
+# A picture she wrote out in brackets ("[You sent a picture: ...]") instead of calling
+# create_image: it is taken out of her text and taken as the call she meant.
+WRITTEN_PICTURE = re.compile(
+    r"\[\s*(?:you\s+)?(?:sends?|sent)?\s*(?:a\s+)?(?:picture|photo|selfie|image|pic)\s*:\s*([^\]]*)\]?",
+    re.IGNORECASE)
 
 
 def serialize(row: dict[str, Any]) -> dict[str, Any]:
@@ -91,14 +97,36 @@ def model_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 content = f"{content}\n[Photo: {row['photo_note']}]".strip()
             messages.append({"role": "user", "content": content})
         else:
-            if row.get("image_kind") == "generated" and row.get("image_prompt"):
-                content = f"{content}\n[You sent a picture: {row['image_prompt']}]".strip()
-            key = " ".join(content.split()).casefold()
+            content = without_written_pictures(content)
+            picture = row.get("image_prompt") if row.get("image_kind") == "generated" else None
+            key = " ".join(f"{content} {picture or ''}".split()).casefold()
             if key in said:
                 continue
             said.add(key)
-            messages.append({"role": "assistant", "content": content})
+            if picture:
+                # Her pictures appear as the create_image calls they were, so she learns to
+                # call the tool again rather than to write a picture out in words.
+                call = {"function": {"name": "create_image", "arguments": {
+                    "description": picture, "include_luna": True, "use_their_photo": False}}}
+                messages.append({"role": "assistant", "content": content, "tool_calls": [call]})
+                messages.append({"role": "tool", "content": "The picture was sent."})
+            else:
+                messages.append({"role": "assistant", "content": content})
     return messages
+
+
+def without_written_pictures(text: str) -> str:
+    """Her text without any picture she wrote out in brackets."""
+    return "\n".join(line.rstrip() for line in WRITTEN_PICTURE.sub("", text).splitlines()).strip()
+
+
+def written_picture(text: str) -> dict[str, Any] | None:
+    """A create_image call for a picture she wrote out in brackets, if she did."""
+    match = WRITTEN_PICTURE.search(text)
+    if not match or not match.group(1).strip():
+        return None
+    return {"function": {"name": "create_image", "arguments": {
+        "description": match.group(1).strip(), "include_luna": True, "use_their_photo": False}}}
 
 
 def normalized_photo(data: bytes) -> bytes:
@@ -196,6 +224,9 @@ class Conversation:
 
         image_id = None
         call = next((c for c in calls if (c.get("function") or {}).get("name") == "create_image"), None)
+        if call is None:
+            call = written_picture(text)
+        text = without_written_pictures(text)
         if call:
             arguments = call["function"].get("arguments") or {}
             if isinstance(arguments, str):

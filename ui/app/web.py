@@ -89,6 +89,15 @@ class Sessions:
         return user
 
 
+def download_name(image: dict[str, Any], suffix: str) -> str:
+    """A downloaded picture's file name: "luna-2026-11-11-1615.png", or "photo-..." for the owner's photos."""
+    sender = (image.get("companion_name") or "picture") if image.get("kind") == "generated" else "photo"
+    sender = re.sub(r"[^a-z0-9]+", "-", sender.casefold()).strip("-") or "picture"
+    created = image.get("created_at")
+    stamp = created.astimezone().strftime("%Y-%m-%d-%H%M") if created else str(image.get("id", ""))
+    return f"{sender}-{stamp}{suffix}"
+
+
 def first_name(user: dict[str, Any]) -> str:
     return (str(user.get("name") or "").split() or [""])[0]
 
@@ -316,6 +325,10 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         path = config.images_dir / row["file"] if row else None
         if not path or not path.exists():
             return JSONResponse({"error": "no such image"}, 404)
+        if request.query_params.get("download"):
+            # Named for who sent it and when: "luna-2026-11-11-1615.png", or "photo-..." for yours.
+            return FileResponse(path, filename=download_name(row, path.suffix),
+                                headers={"Cache-Control": "private, no-cache"})
         return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
     async def profile(request: Request) -> Response:

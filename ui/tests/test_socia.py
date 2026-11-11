@@ -13,7 +13,7 @@ import httpx
 from PIL import Image
 from starlette.testclient import TestClient
 
-from app.chat import Conversation, model_messages
+from app.chat import Conversation, model_messages, without_written_pictures, written_picture
 from app.memory import ExportError, MemoryReader, fact_lines, parse_export, their_words
 from app.config import SociaConfig
 from app.images import ComfyUI, workflow
@@ -208,9 +208,21 @@ class PromptTests(unittest.TestCase):
         ]
         self.assertEqual(model_messages(rows), [
             {"role": "user", "content": "look\n[Photo: A beach at sunset.]"},
-            {"role": "assistant", "content": "wow 😍\n[You sent a picture: Luna on the beach]"},
+            {"role": "assistant", "content": "wow 😍", "tool_calls": [{"function": {"name": "create_image", "arguments": {
+                "description": "Luna on the beach", "include_luna": True, "use_their_photo": False}}}]},
+            {"role": "tool", "content": "The picture was sent."},
             {"role": "assistant", "content": "hi"},
         ])
+
+    def test_a_picture_she_wrote_out_is_taken_out_and_taken_as_a_call(self):
+        text = "Okay, here's a little more…\n[You sent a picture: Luna by the window, in a sheer blouse.]"
+        self.assertEqual(without_written_pictures(text), "Okay, here's a little more…")
+        self.assertEqual(written_picture(text)["function"]["arguments"]["description"],
+                         "Luna by the window, in a sheer blouse.")
+        self.assertIsNone(written_picture("[hugs you] no picture here"))
+        self.assertEqual(without_written_pictures("[hugs you] hi"), "[hugs you] hi")
+        rows = [{"role": "luna", "content": text, "image_kind": None}]
+        self.assertEqual(model_messages(rows), [{"role": "assistant", "content": "Okay, here's a little more…"}])
 
     def test_the_persona_names_her_the_person_and_the_time(self):
         luna = {"name": "Luna", "persona": {}}
@@ -887,3 +899,13 @@ class LoopAndLanguageTests(unittest.TestCase):
         voice.whisper = Whisper()
         self.assertEqual(voice.language(None), "hi")
         self.assertEqual(config().stt_languages, ("en", "hi"))
+
+
+class DownloadTests(unittest.TestCase):
+    def test_a_download_is_named_for_who_sent_it_and_when(self):
+        from app.web import download_name
+        when = datetime(2026, 11, 11, 16, 15, tzinfo=timezone.utc)
+        self.assertRegex(download_name({"id": 4, "kind": "generated", "companion_name": "Luna Rose", "created_at": when}, ".png"),
+                         r"^luna-rose-2026-11-1\d-\d{4}\.png$")
+        self.assertRegex(download_name({"id": 5, "kind": "photo", "created_at": when}, ".jpg"), r"^photo-2026-")
+        self.assertEqual(download_name({"id": 6, "kind": "generated"}, ".png"), "picture-6.png")
