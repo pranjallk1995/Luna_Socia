@@ -19,6 +19,9 @@ LOOKS_PROMPT = ("Describe only the woman's lasting appearance in one or two sent
                 "hair, skin, eyes, build, age range. Not her clothes, pose or the scene. No preamble.")
 
 
+# Above 1 makes tokens she used in the last 256 less likely; 1.15 breaks loops without stilted wording.
+REPEAT_PENALTY = 1.15
+
 class Ollama:
     def __init__(self, config: SociaConfig, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.config = config
@@ -33,7 +36,9 @@ class Ollama:
             "stream": True,
             # Qwen3 thinks before answering unless told not to; a text reply needs no reasoning.
             "think": False,
-            "options": {"num_ctx": self.config.context_tokens, "temperature": self.config.temperature},
+            # The repeat penalty keeps her from echoing her own recent words.
+            "options": {"num_ctx": self.config.context_tokens, "temperature": self.config.temperature,
+                        "repeat_penalty": REPEAT_PENALTY, "repeat_last_n": 256},
         }
         if tools:
             body["tools"] = tools
@@ -52,6 +57,21 @@ class Ollama:
                     yield {"text": message["content"]}
                 if message.get("tool_calls"):
                     yield {"tool_calls": message["tool_calls"]}
+
+    async def complete(self, prompt: str) -> str:
+        """One answer from the chat model, without streaming: for reading imported chats.
+
+        It uses her context size, so Ollama keeps the resident model loaded instead of reloading it.
+        """
+        reply = await self.client.post("/api/chat", json={
+            "model": self.config.chat_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "think": False,
+            "options": {"num_ctx": self.config.context_tokens, "temperature": 0.2},
+        })
+        reply.raise_for_status()
+        return (reply.json().get("message") or {}).get("content", "").strip()
 
     async def describe_photo(self, image: bytes, prompt: str = PHOTO_PROMPT) -> str:
         """What is in a photo, from the vision model, for Luna to react to."""

@@ -1,4 +1,4 @@
-"""One turn of the conversation: what Luna sees, what she says, and the pictures she sends."""
+"""One turn of a conversation: what she sees, what she says, and the pictures she sends."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from PIL import Image, ImageOps
 from app.config import SociaConfig
 from app.images import ComfyUI
 from app.ollama import LOOKS_PROMPT, Ollama
-from app.persona import TOOLS, image_prompt, system_prompt
+from app.persona import TOOLS, clean_persona, image_prompt, system_prompt
 from app.store import SociaStore
 
 logger = logging.getLogger("socia")
@@ -29,6 +29,7 @@ def serialize(row: dict[str, Any]) -> dict[str, Any]:
     """A message as the page shows it."""
     return {
         "id": row["id"],
+        "chat_id": row.get("chat_id"),
         "role": row["role"],
         "content": row["content"],
         "image_url": f"/api/images/{row['image_id']}" if row.get("image_id") else None,
@@ -37,9 +38,52 @@ def serialize(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def serialize_companion(row: dict[str, Any]) -> dict[str, Any]:
+    """A girlfriend as the page shows her; her memory's progress is added by the web layer."""
+    last = row.get("last_active")
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "persona": clean_persona(row.get("persona") or {}),
+        "voice": row["voice"],
+        "memory": row.get("memory") or "",
+        "chats": int(row.get("chats") or 0),
+        "last_active": last.isoformat() if last else None,
+        "created_at": row["created_at"].isoformat(),
+    }
+
+
+def serialize_chat(row: dict[str, Any]) -> dict[str, Any]:
+    """A chat as the page lists it."""
+    last = (row.get("last_content") or "").strip() or ("📷 Picture" if row.get("last_image_id") else "")
+    if last and row.get("last_role") == "user":
+        last = f"You: {last}"
+    return {
+        "id": row["id"],
+        "companion_id": row.get("companion_id"),
+        "title": row["title"] or "New chat",
+        "last": last,
+        "created_at": row["created_at"].isoformat(),
+        "updated_at": row["updated_at"].isoformat(),
+    }
+
+
+def chat_title(text: str, photo: bool) -> str:
+    """A chat's name, from its first message."""
+    words = " ".join(text.split())
+    if not words:
+        return "Photo" if photo else ""
+    limit = SociaConfig.CHAT_TITLE_CHARS
+    return words if len(words) <= limit else words[:limit - 1].rstrip() + "…"
+
+
 def model_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The conversation as the chat model reads it: photos and pictures become notes in brackets."""
-    messages = []
+    """The conversation as the chat model reads it: photos and pictures become notes in brackets.
+
+    A reply she already sent once is left out the second time: a model that sees itself
+    repeat a line (a refusal, say) tends to send it again and again.
+    """
+    messages, said = [], set()
     for row in rows:
         content = row["content"]
         if row["role"] == "user":
@@ -49,6 +93,10 @@ def model_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             if row.get("image_kind") == "generated" and row.get("image_prompt"):
                 content = f"{content}\n[You sent a picture: {row['image_prompt']}]".strip()
+            key = " ".join(content.split()).casefold()
+            if key in said:
+                continue
+            said.add(key)
             messages.append({"role": "assistant", "content": content})
     return messages
 
@@ -77,14 +125,24 @@ class Conversation:
         (self.config.images_dir / name).write_bytes(data)
         return name
 
-    async def send(self, text: str, photo: bytes | None, name: str, timezone: str | None) -> AsyncIterator[dict[str, Any]]:
-        """Store what was sent, then stream Luna's answer as events for the page."""
+    async def send(self, companion: dict[str, Any], chat_id: int | None, text: str, photo: bytes | None, name: str,
+                   timezone: str | None) -> AsyncIterator[dict[str, Any]]:
+        """Store what was sent, then stream her answer as events for the page.
+
+        Without a chat, a new one with her is started and named after this message.
+        """
         async with self.turn:
+            if chat_id is None:
+                chat = await asyncio.to_thread(self.store.create_chat, companion["id"])
+                chat_id = chat["id"]
+            await asyncio.to_thread(self.store.title_chat, chat_id, chat_title(text, bool(photo)))
+            chat = await asyncio.to_thread(self.store.chat, chat_id)
+            yield {"type": "chat", "chat": serialize_chat(chat)}
             image_id = note = None
             if photo:
                 photo = await asyncio.to_thread(normalized_photo, photo)
-                image_id = await asyncio.to_thread(self.store.add_image, "photo", self.save_file(photo, ".jpg"))
-            sent = await asyncio.to_thread(self.store.add_message, "user", text, image_id)
+                image_id = await asyncio.to_thread(self.store.add_image, chat_id, "photo", self.save_file(photo, ".jpg"))
+            sent = await asyncio.to_thread(self.store.add_message, chat_id, "user", text, image_id)
             yield {"type": "user", "message": serialize(sent)}
             if photo:
                 yield {"type": "status", "text": "Looking at your photo"}
@@ -94,7 +152,7 @@ class Conversation:
                     logger.warning("Could not describe the photo: %s", error)
                     note = "(the photo did not load for you)"
                 await asyncio.to_thread(self.store.set_photo_note, sent["id"], note)
-            async for event in self.answer(name, timezone):
+            async for event in self.answer(companion, chat_id, name, timezone):
                 yield event
 
     def now(self, timezone: str | None) -> datetime:
@@ -103,9 +161,10 @@ class Conversation:
         except (KeyError, ValueError):
             return datetime.now()
 
-    async def looks(self) -> str:
-        """How Luna looks, read once from her profile picture and again when it changes."""
-        profile, notes = self.config.profile_path, self.config.profile_path.with_suffix(".txt")
+    async def looks(self, companion_id: int) -> str:
+        """How she looks, read once from her profile picture and again when it changes."""
+        profile = self.config.profile_path(companion_id)
+        notes = profile.with_suffix(".txt")
         if not profile.exists():
             return ""
         if notes.exists() and notes.stat().st_mtime >= profile.stat().st_mtime:
@@ -118,9 +177,10 @@ class Conversation:
         notes.write_text(looks)
         return looks
 
-    async def answer(self, name: str, timezone: str | None) -> AsyncIterator[dict[str, Any]]:
-        rows = await asyncio.to_thread(self.store.recent, SociaConfig.HISTORY_MESSAGES)
-        prompt = system_prompt(name, self.now(timezone), await self.looks())
+    async def answer(self, companion: dict[str, Any], chat_id: int, name: str,
+                     timezone: str | None) -> AsyncIterator[dict[str, Any]]:
+        rows = await asyncio.to_thread(self.store.recent, chat_id, SociaConfig.HISTORY_MESSAGES)
+        prompt = system_prompt(companion, name, self.now(timezone), await self.looks(companion["id"]))
         messages = [{"role": "system", "content": prompt}, *model_messages(rows)]
         text, calls = "", []
         try:
@@ -131,7 +191,7 @@ class Conversation:
                 calls += piece.get("tool_calls", [])
         except Exception as error:  # noqa: BLE001 - shown in the chat
             logger.exception("Chat model failed")
-            yield {"type": "error", "text": f"Luna could not answer: {error}"}
+            yield {"type": "error", "text": f"{companion['name']} could not answer: {error}"}
             return
 
         image_id = None
@@ -142,7 +202,7 @@ class Conversation:
                 arguments = json.loads(arguments or "{}")
             yield {"type": "image_started"}
             try:
-                image_id = await self.picture(arguments)
+                image_id = await self.picture(companion["id"], chat_id, arguments)
                 yield {"type": "image", "url": f"/api/images/{image_id}"}
             except Exception as error:  # noqa: BLE001 - shown in the chat
                 logger.exception("Image failed")
@@ -159,19 +219,20 @@ class Conversation:
                 except Exception:  # noqa: BLE001 - the picture alone is enough
                     logger.exception("Caption failed")
 
-        saved = await asyncio.to_thread(self.store.add_message, "luna", text.strip(), image_id)
+        saved = await asyncio.to_thread(self.store.add_message, chat_id, "luna", text.strip(), image_id)
         yield {"type": "done", "message": serialize(saved)}
 
-    async def picture(self, arguments: dict[str, Any]) -> int:
+    async def picture(self, companion_id: int, chat_id: int, arguments: dict[str, Any]) -> int:
         description = str(arguments.get("description") or "").strip() or "a cosy selfie"
-        profile = self.config.profile_path
-        with_luna = bool(arguments.get("include_luna")) and profile.exists()
-        photo = await asyncio.to_thread(self.store.last_photo) if arguments.get("use_their_photo") else None
-        prompt, order = image_prompt(description, with_luna, photo is not None)
-        files = {"luna": profile, "photo": self.config.images_dir / photo["file"] if photo else None}
-        references = [files[name].read_bytes() for name in order]
+        profile = self.config.profile_path(companion_id)
+        # Her profile picture first, then her other pictures; none without a profile picture.
+        lunas = [profile, *self.config.references(companion_id)] if arguments.get("include_luna") and profile.exists() else []
+        photo = await asyncio.to_thread(self.store.last_photo, chat_id) if arguments.get("use_their_photo") else None
+        prompt, order = image_prompt(description, len(lunas), photo is not None)
+        pictures = {"luna": iter(lunas), "photo": iter([self.config.images_dir / photo["file"]] if photo else [])}
+        references = [next(pictures[name]).read_bytes() for name in order]
         # Ollama's models out of the GPU first; ComfyUI frees its own when done.
         await self.ollama.unload_all()
         image = await self.comfy.generate(prompt, references)
         file = await asyncio.to_thread(self.save_file, image, ".png")
-        return await asyncio.to_thread(self.store.add_image, "generated", file, description)
+        return await asyncio.to_thread(self.store.add_image, chat_id, "generated", file, description)

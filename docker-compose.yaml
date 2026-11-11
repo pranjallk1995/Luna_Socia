@@ -18,6 +18,7 @@ services:
       # Must equal SENTIA_RESIDENT_CONTEXT, or Ollama reloads her model for every reply.
       LUNASOCIA_CONTEXT_TOKENS: ${LUNASOCIA_CONTEXT_TOKENS:-8192}
       LUNASOCIA_STT_MODEL: ${LUNASOCIA_STT_MODEL:-large-v3-turbo}
+      LUNASOCIA_STT_LANGUAGES: ${LUNASOCIA_STT_LANGUAGES:-en,hi}
       LUNASOCIA_TTS_VOICE: ${LUNASOCIA_TTS_VOICE:-af_heart}
       TZ: Asia/Kolkata
     volumes:

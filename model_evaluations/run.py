@@ -29,7 +29,8 @@ args = parser.parse_args()
 
 config = dataclasses.replace(SociaConfig.from_env(), chat_model=args.model)
 # A fixed name and time, so both models see the same prompt.
-PROMPT = system_prompt("Sam", datetime(2026, 11, 5, 20, 30))
+# Luna as she started: the default persona (playful, short replies, some emoji, your language).
+PROMPT = system_prompt({"name": "Luna", "persona": {}}, "Sam", datetime(2026, 11, 5, 20, 30))
 
 
 async def reply(ollama: Ollama, messages: list[dict]) -> dict:

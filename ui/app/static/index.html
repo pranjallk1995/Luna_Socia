@@ -9,66 +9,277 @@
   <script src="/static/app.js?v=__ASSETS__" defer></script>
 </head>
 <body>
-<div class="sc-app">
-  <header class="sc-header">
-    <button class="sc-avatar-button" type="button" id="profile-open" aria-label="Luna's profile picture">
-      <img class="sc-avatar" id="avatar" src="/static/logo.png" alt="">
-    </button>
-    <div class="sc-who">
-      <h1>Luna</h1>
-      <p id="presence" role="status">online</p>
+
+<!-- Landing: choose a girlfriend, or create one. -->
+<section class="sc-view sc-home" id="home" hidden>
+  <header class="sc-topbar">
+    <img class="sc-logo" src="/static/logo.png" alt="">
+    <div class="sc-topbar-title">
+      <h1>Luna Socia</h1>
+      <p>Your girlfriends</p>
     </div>
-    <div class="sc-header-actions">
-      <button class="sc-icon" type="button" id="voice-toggle" aria-pressed="false" title="Read Luna's replies aloud">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg>
-        <span class="sc-visually-hidden">Read replies aloud</span>
-      </button>
-      <button class="sc-icon" type="button" id="menu-open" title="Settings" aria-haspopup="dialog">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-        <span class="sc-visually-hidden">Settings</span>
-      </button>
+    <a class="sc-ghost" href="/logout">Sign out</a>
+  </header>
+  <main class="sc-home-body">
+    <h2 class="sc-home-heading">Who do you want to talk to?</h2>
+    <ul class="sc-cards" id="companions" aria-busy="true"></ul>
+    <p class="sc-muted sc-brand">__BRAND__</p>
+  </main>
+</section>
+
+<!-- Create a girlfriend, or change one. -->
+<section class="sc-view sc-editor" id="editor" hidden>
+  <header class="sc-topbar">
+    <button class="sc-icon" type="button" id="editor-back" title="Back">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+      <span class="sc-visually-hidden">Back</span>
+    </button>
+    <div class="sc-topbar-title">
+      <h1 id="editor-title">Create a girlfriend</h1>
+      <p id="editor-subtitle">Her looks, how she texts, her voice and what she knows about you</p>
     </div>
   </header>
+  <form class="sc-editor-body" id="editor-form" novalidate>
+    <div class="sc-editor-main">
+      <fieldset class="sc-panel">
+        <legend>Who she is</legend>
+        <label class="sc-field">
+          <span>Her name</span>
+          <input type="text" id="her-name" autocomplete="off" required placeholder="Luna">
+        </label>
+        <label class="sc-field">
+          <span>About her <em class="sc-muted">optional</em></span>
+          <textarea id="her-about" rows="4" placeholder="Her age, what she does, what she loves, how you met…"></textarea>
+        </label>
+      </fieldset>
 
-  <main class="sc-thread" id="thread" aria-live="polite">
-    <button class="sc-older" type="button" id="older" hidden>Earlier messages</button>
-    <div id="messages"></div>
-  </main>
+      <fieldset class="sc-panel">
+        <legend>Her picture</legend>
+        <div class="sc-picture-pick">
+          <img class="sc-picture-preview" id="her-picture-preview" alt="Her profile picture" hidden>
+          <div class="sc-picture-empty" id="her-picture-empty" aria-hidden="true">No picture yet</div>
+          <div class="sc-picture-actions">
+            <label class="sc-button">
+              <input type="file" id="her-picture" accept="image/*" hidden>
+              <span id="her-picture-label">Choose her profile picture</span>
+            </label>
+            <p class="sc-muted">Her face in every picture she takes. A clear, front-facing portrait works best. You can crop her avatar and add more pictures of her in her chat's settings.</p>
+          </div>
+        </div>
+      </fieldset>
 
-  <form class="sc-composer" id="composer">
-    <div class="sc-attachment" id="attachment" hidden>
-      <img id="attachment-preview" alt="Photo to send">
-      <button type="button" id="attachment-remove" aria-label="Remove photo">×</button>
+      <fieldset class="sc-panel">
+        <legend>How she texts</legend>
+        <div class="sc-styles" id="her-styles" role="radiogroup" aria-label="Her personality"></div>
+        <div class="sc-choice-row">
+          <div class="sc-choice">
+            <span id="length-label">Reply length</span>
+            <div class="sc-segmented" id="her-length" role="radiogroup" aria-labelledby="length-label"></div>
+          </div>
+          <div class="sc-choice">
+            <span id="emoji-label">Emoji</span>
+            <div class="sc-segmented" id="her-emoji" role="radiogroup" aria-labelledby="emoji-label"></div>
+          </div>
+          <label class="sc-choice">
+            <span>Language</span>
+            <select id="her-language"></select>
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset class="sc-panel">
+        <legend>Her voice</legend>
+        <p class="sc-muted">Used when she reads her replies aloud. Play one to hear it. The first sample takes a few seconds.</p>
+        <div class="sc-voices" id="her-voices" role="radiogroup" aria-label="Her voice"></div>
+      </fieldset>
+
+      <fieldset class="sc-panel">
+        <legend>Her memory</legend>
+        <p class="sc-muted">Give her your chats from ChatGPT or Claude, and she learns about you from them: the people in your life, your work, your plans and what you like. Only your own messages are read, here on your machine.</p>
+        <details class="sc-help">
+          <summary>How to export your chats</summary>
+          <p><strong>ChatGPT:</strong> Settings → Data controls → Export data. The .zip arrives by email.</p>
+          <p><strong>Claude:</strong> Settings → Privacy → Export data. The .zip arrives by email.</p>
+          <p>Upload the .zip as it is, or the conversations.json inside it. Importing the same export again skips chats she already has.</p>
+        </details>
+        <label class="sc-drop" id="her-export-drop">
+          <input type="file" id="her-export" accept=".zip,.json,application/zip,application/json" hidden>
+          <strong id="her-export-label">Choose an export (.zip or conversations.json)</strong>
+          <span class="sc-muted">or drop it here</span>
+        </label>
+        <div class="sc-memory-state" id="memory-state" hidden>
+          <div class="sc-progress" role="progressbar" aria-label="Reading your chats" id="memory-bar"><i></i></div>
+          <p class="sc-muted" id="memory-note"></p>
+        </div>
+        <label class="sc-field" id="memory-field" hidden>
+          <span>What she remembers about you <em class="sc-muted">edit freely</em></span>
+          <textarea id="her-memory" rows="8" placeholder="- they love filter coffee&#10;- their sister is called Asha"></textarea>
+        </label>
+        <button class="sc-button sc-danger" type="button" id="memory-forget" hidden>Delete the imported chats</button>
+      </fieldset>
+
+      <p class="sc-error" id="editor-error" role="alert" hidden></p>
+      <div class="sc-editor-actions">
+        <button class="sc-button sc-danger" type="button" id="her-delete" hidden>Delete her</button>
+        <span class="sc-spacer"></span>
+        <button class="sc-button" type="button" id="editor-cancel">Cancel</button>
+        <button class="sc-button sc-primary" type="submit" id="editor-save">Create her</button>
+      </div>
     </div>
-    <div class="sc-row">
-      <label class="sc-icon" title="Send a photo">
-        <input type="file" id="photo" accept="image/*" hidden>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>
-        <span class="sc-visually-hidden">Send a photo</span>
-      </label>
-      <textarea id="text" rows="1" placeholder="Message Luna" aria-label="Message"></textarea>
-      <button class="sc-icon" type="button" id="mic" title="Hold a voice message">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10a7 7 0 0 1-14 0"/><path d="M12 17v5"/></svg>
-        <span class="sc-visually-hidden">Voice message</span>
-      </button>
-      <button class="sc-send" type="submit" id="send" aria-label="Send">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 14-7-4 14-3-6-7-1Z"/></svg>
-      </button>
-    </div>
+
+    <aside class="sc-preview" aria-label="Preview">
+      <div class="sc-preview-card">
+        <div class="sc-preview-photo">
+          <img id="preview-picture" alt="" hidden>
+          <span id="preview-initial" aria-hidden="true">?</span>
+        </div>
+        <div class="sc-preview-text">
+          <h3 id="preview-name">Her name</h3>
+          <p class="sc-muted" id="preview-style"></p>
+          <p class="sc-muted sc-preview-label">You: It's raining again…</p>
+          <div class="sc-bubble sc-preview-bubble" id="preview-bubble"></div>
+          <p class="sc-muted" id="preview-voice"></p>
+          <p class="sc-muted" id="preview-memory"></p>
+        </div>
+      </div>
+      <p class="sc-muted sc-preview-note">How she texts shapes every reply right away. The chats you import stay saved as training data for her own fine-tuned model later.</p>
+    </aside>
   </form>
+</section>
+
+<!-- One girlfriend's chats. -->
+<div class="sc-view sc-chat-view" id="chat" hidden>
+  <aside class="sc-sidebar" id="sidebar" aria-label="Chats">
+    <div class="sc-sidebar-head">
+      <button class="sc-ghost sc-back" type="button" id="to-home">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+        All girlfriends
+      </button>
+      <button class="sc-icon sc-sidebar-close" type="button" id="chats-close" aria-label="Close">×</button>
+    </div>
+    <div class="sc-switcher" id="switcher" aria-label="Switch girlfriend"></div>
+    <button class="sc-button" type="button" id="drawer-new-chat">New chat</button>
+    <ul class="sc-chat-list" id="chat-list"></ul>
+    <p class="sc-muted" id="chats-note"></p>
+  </aside>
+  <div class="sc-backdrop" id="sidebar-backdrop" hidden></div>
+
+  <div class="sc-app">
+    <header class="sc-header">
+      <button class="sc-icon sc-chats-toggle" type="button" id="chats-open" title="Chats" aria-controls="sidebar" aria-expanded="false">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg>
+        <span class="sc-visually-hidden">Chats</span>
+      </button>
+      <button class="sc-avatar-button" type="button" id="profile-open" aria-label="Her profile picture">
+        <img class="sc-avatar" id="avatar" src="/static/logo.png" alt="">
+      </button>
+      <div class="sc-who">
+        <h1 id="her-title">Luna</h1>
+        <p id="presence" role="status">online</p>
+        <p class="sc-chat-title" id="chat-title"></p>
+      </div>
+      <div class="sc-header-actions">
+        <button class="sc-icon" type="button" id="new-chat" title="New chat">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.4 3.6a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          <span class="sc-visually-hidden">New chat</span>
+        </button>
+        <button class="sc-icon" type="button" id="voice-toggle" aria-pressed="false" title="Read her replies aloud">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg>
+          <span class="sc-visually-hidden">Read replies aloud</span>
+        </button>
+        <button class="sc-icon" type="button" id="menu-open" title="Settings" aria-haspopup="dialog">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+          <span class="sc-visually-hidden">Settings</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="sc-thread" id="thread" aria-live="polite">
+      <div class="sc-thread-inner">
+        <button class="sc-older" type="button" id="older" hidden>Earlier messages</button>
+        <div id="messages"></div>
+        <p class="sc-empty" id="empty" hidden></p>
+      </div>
+    </main>
+
+    <form class="sc-composer" id="composer">
+      <div class="sc-composer-inner">
+        <div class="sc-attachment" id="attachment" hidden>
+          <img id="attachment-preview" alt="Photo to send">
+          <button type="button" id="attachment-remove" aria-label="Remove photo">×</button>
+        </div>
+        <div class="sc-row">
+          <label class="sc-icon" title="Send a photo">
+            <input type="file" id="photo" accept="image/*" hidden>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>
+            <span class="sc-visually-hidden">Send a photo</span>
+          </label>
+          <textarea id="text" rows="1" placeholder="Message her" aria-label="Message"></textarea>
+          <button class="sc-icon" type="button" id="mic" title="Record a voice message">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10a7 7 0 0 1-14 0"/><path d="M12 17v5"/></svg>
+            <span class="sc-visually-hidden">Voice message</span>
+          </button>
+          <button class="sc-send" type="submit" id="send" aria-label="Send">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 14-7-4 14-3-6-7-1Z"/></svg>
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <!-- About her: on wide screens, beside the chat. -->
+  <aside class="sc-about" id="about" aria-label="About her">
+    <img class="sc-about-photo" id="about-photo" alt="" hidden>
+    <h2 id="about-name"></h2>
+    <p class="sc-muted" id="about-style"></p>
+    <p class="sc-about-text" id="about-text"></p>
+    <dl class="sc-about-facts">
+      <div><dt>Voice</dt><dd id="about-voice"></dd></div>
+      <div><dt>Memory</dt><dd id="about-memory"></dd></div>
+      <div><dt>Chats</dt><dd id="about-chats"></dd></div>
+    </dl>
+    <button class="sc-button" type="button" id="about-edit">Edit her</button>
+    <button class="sc-button" type="button" id="about-settings">Pictures and settings</button>
+  </aside>
 </div>
 
 <dialog class="sc-dialog" id="menu">
   <form method="dialog" class="sc-dialog-body">
-    <h2>Luna</h2>
-    <img class="sc-profile-large" id="profile-large" alt="Luna's profile picture" hidden>
+    <h2 id="menu-title">Luna</h2>
+    <img class="sc-profile-large" id="profile-large" alt="Her profile picture" hidden>
     <p class="sc-muted" id="profile-note">Her profile picture is her face in every picture she takes.</p>
+    <button class="sc-button" type="button" id="crop-open" hidden>Adjust her avatar</button>
+    <div class="sc-crop" id="crop" hidden>
+      <div class="sc-crop-stage" id="crop-stage" tabindex="0" role="group"
+           aria-label="Her avatar's crop: drag, or use the arrow keys, to move her face into the circle">
+        <img id="crop-image" alt="" draggable="false">
+        <div class="sc-crop-ring" aria-hidden="true"></div>
+      </div>
+      <label class="sc-crop-zoom">
+        <span>Zoom</span>
+        <input type="range" id="crop-zoom" min="1" max="6" step="0.01" value="1">
+      </label>
+      <p class="sc-muted">Drag to move, scroll or slide to zoom. The circle is her avatar.</p>
+      <div class="sc-crop-actions">
+        <button class="sc-button" type="button" id="crop-reset">Default</button>
+        <button class="sc-button" type="button" id="crop-cancel">Cancel</button>
+        <button class="sc-button sc-crop-save" type="button" id="crop-save">Save</button>
+      </div>
+    </div>
     <label class="sc-button">
       <input type="file" id="profile-file" accept="image/*" hidden>
       Change her profile picture
     </label>
+    <h3>Other pictures of her</h3>
+    <ul class="sc-references" id="references"></ul>
+    <p class="sc-muted" id="references-note">More pictures of her keep her face the same from other sides. Each one makes a picture a little slower.</p>
+    <label class="sc-button" id="references-add">
+      <input type="file" id="references-file" accept="image/*" multiple hidden>
+      Add pictures of her
+    </label>
+    <button class="sc-button" type="button" id="menu-edit">Edit her personality, voice and memory</button>
     <p class="sc-muted" id="model-note"></p>
-    <button class="sc-button sc-danger" type="button" id="clear">Start the conversation over</button>
+    <button class="sc-button sc-danger" type="button" id="delete-chat">Delete this chat</button>
     <a class="sc-button" href="/logout">Sign out</a>
     <button class="sc-button" value="close">Close</button>
     <p class="sc-muted sc-brand">__BRAND__</p>

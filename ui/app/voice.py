@@ -23,6 +23,18 @@ WHISPER_THREADS = max(4, (os.cpu_count() or 8) // 2)
 PICTOGRAPHS = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+")
 
 
+# Devanagari, which only the Hindi phonemizer can read.
+DEVANAGARI = re.compile("[\u0900-\u097F]")
+SAMPLE = "Hey you. I was just thinking about you… how was your day?"
+
+
+def language(text: str, voice: str) -> str:
+    """Kokoro's language for this text in this voice: Hindi for Devanagari, else the voice's English."""
+    if DEVANAGARI.search(text):
+        return "hi"
+    return "en-gb" if voice.startswith("b") else "en-us"
+
+
 def speakable(text: str) -> str:
     """The words of a message, without emoji or the text of actions like *smiles*."""
     text = PICTOGRAPHS.sub("", text)
@@ -52,11 +64,26 @@ class Voice:
                 self.whisper = WhisperModel(self.config.stt_model, device="cpu", compute_type="int8",
                                             cpu_threads=WHISPER_THREADS,
                                             download_root=str(self.config.models_dir / "whisper"))
-            segments, _ = self.whisper.transcribe(io.BytesIO(audio), beam_size=1, vad_filter=True)
+            from faster_whisper import decode_audio
+
+            samples = decode_audio(io.BytesIO(audio))
+            segments, _ = self.whisper.transcribe(samples, beam_size=1, vad_filter=True,
+                                                  language=self.language(samples))
             return " ".join(segment.text.strip() for segment in segments).strip()
 
-    def speak(self, text: str) -> bytes:
-        """A WAV file of Luna saying ``text``."""
+    def language(self, samples) -> str | None:
+        """The likeliest of the owner's languages (LUNASOCIA_STT_LANGUAGES), or None to let Whisper choose."""
+        allowed = self.config.stt_languages
+        if not allowed:
+            return None
+        if len(allowed) == 1:
+            return allowed[0]
+        _, _, scores = self.whisper.detect_language(samples, vad_filter=True)
+        likely = dict(scores)
+        return max(allowed, key=lambda code: likely.get(code, 0.0))
+
+    def speak(self, text: str, voice: str | None = None) -> bytes:
+        """A WAV file of her saying ``text`` in ``voice`` (a Kokoro voice id)."""
         import soundfile
 
         with self.lock:
@@ -68,7 +95,9 @@ class Voice:
                     if not (folder / name).exists():
                         download(f"{KOKORO_RELEASE}/{name}", folder / name)
                 self.kokoro = Kokoro(str(folder / KOKORO_FILES[0]), str(folder / KOKORO_FILES[1]))
-            samples, rate = self.kokoro.create(speakable(text) or "Mm-hm.", voice=self.config.tts_voice, speed=1.0, lang="en-us")
+            words = speakable(text) or "Mm-hm."
+            voice = voice or self.config.tts_voice
+            samples, rate = self.kokoro.create(words, voice=voice, speed=1.0, lang=language(words, voice))
         buffer = io.BytesIO()
         soundfile.write(buffer, samples, rate, format="WAV")
         return buffer.getvalue()
