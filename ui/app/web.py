@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import html
 import json
 import re
@@ -30,6 +31,7 @@ from app.avatar import Avatar
 from app.chat import Conversation, normalized_photo, serialize, serialize_chat, serialize_companion
 from app.config import SociaConfig
 from app.images import ComfyUI
+from app import model_usage
 from app.memory import ExportError, MemoryReader, parse_export
 from app.persona import CHOICES, DEFAULT_PERSONA, STYLES, VOICE_IDS, VOICES, clean_persona, example
 from app.store import SociaStore
@@ -346,6 +348,9 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
             path.write_bytes(data)
             # A crop chosen for the old picture would cut the new one anywhere.
             Avatar(path).reset()
+            # A new face needs its own confirmation that it is AI-generated before nude pictures.
+            persona = clean_persona({"nude_pictures": "off"}, row.get("persona"))
+            await asyncio.to_thread(store.update_companion, row["id"], {"persona": persona})
             return JSONResponse({"saved": True})
         if not path.exists():
             return JSONResponse({"error": "She has no profile picture yet."}, 404)
@@ -505,6 +510,20 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         return JSONResponse({"chat_model": config.chat_model, "images": await comfy.available(),
                              "brand": SociaConfig.BRAND})
 
+    async def models(request: Request) -> Response:
+        """For Luna Sentia's model monitor: the voice models Socia runs itself, outside Ollama.
+
+        The monitor sends LUNASOCIA_API_TOKEN; the owner's session works too.
+        """
+        scheme, _, credential = request.headers.get("authorization", "").partition(" ")
+        trusted = (config.api_token and scheme.lower() == "bearer"
+                   and hmac.compare_digest(credential.strip().encode(), config.api_token.encode()))
+        if not trusted:
+            user = await owner(request)
+            if isinstance(user, Response):
+                return user
+        return JSONResponse(model_usage.report("socia"))
+
     async def logout(request: Request) -> Response:
         return RedirectResponse(f"{config.auth_public_url}/logout?next={quote(config.public_url + '/', safe='')}", 303)
 
@@ -516,7 +535,10 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         # Imported chats left unread when Socia last stopped are read on.
         if reader:
             reader.start()
+        # Chats started before chats were named get a name, between her replies.
+        naming = asyncio.create_task(conversation.name_old_chats())
         yield
+        naming.cancel()
 
     her_path = "/api/companions/{companion_id:int}"
     return Starlette(lifespan=lifespan, routes=[
@@ -541,6 +563,7 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         Route("/api/transcribe", transcribe, methods=["POST"]),
         Route("/api/speech/{message_id:int}", speech),
         Route("/api/status", status),
+        Route("/api/models", models),
         Route("/logout", logout),
         Route("/health", health),
         Mount("/static", Assets(directory=STATIC), name="static"),

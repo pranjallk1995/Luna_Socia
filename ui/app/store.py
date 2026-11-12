@@ -90,6 +90,8 @@ BEGIN
 END $$;
 ALTER TABLE chats ALTER COLUMN companion_id DROP DEFAULT;
 ALTER TABLE chats ALTER COLUMN companion_id SET NOT NULL;
+-- Who named a chat: '' not yet (its first message stands in), 'auto' the model, 'owner' by hand.
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS named TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS chats_companion ON chats (companion_id, updated_at DESC);
 
 -- Conversations imported from ChatGPT or Claude: read once for facts, kept for training.
@@ -239,7 +241,33 @@ class SociaStore:
 
     def rename_chat(self, chat_id: int, title: str) -> dict[str, Any] | None:
         with self.connect() as db:
-            return db.execute("UPDATE chats SET title = %s WHERE id = %s RETURNING *", (title, chat_id)).fetchone()
+            return db.execute("UPDATE chats SET title = %s, named = 'owner' WHERE id = %s RETURNING *",
+                              (title, chat_id)).fetchone()
+
+    def name_chat(self, chat_id: int, title: str) -> dict[str, Any] | None:
+        """The model's name for a chat; never over one the owner chose."""
+        with self.connect() as db:
+            return db.execute("UPDATE chats SET title = %s, named = 'auto' WHERE id = %s AND named <> 'owner' RETURNING *",
+                              (title, chat_id)).fetchone()
+
+    def keep_name(self, chat_id: int) -> None:
+        """A name the owner gave before chats were named by the model."""
+        with self.connect() as db:
+            db.execute("UPDATE chats SET named = 'owner' WHERE id = %s", (chat_id,))
+
+    def unnamed_chats(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Chats not named yet that she has answered in, oldest first."""
+        with self.connect() as db:
+            return db.execute(
+                "SELECT c.* FROM chats c WHERE c.named = '' AND EXISTS "
+                "(SELECT 1 FROM messages m WHERE m.chat_id = c.id AND m.role = 'luna') ORDER BY c.id LIMIT %s",
+                (limit,)).fetchall()
+
+    def opening(self, chat_id: int, count: int = 6) -> list[dict[str, Any]]:
+        """A chat's first messages, to name it by."""
+        with self.connect() as db:
+            return db.execute("SELECT role, content, image_id FROM messages WHERE chat_id = %s ORDER BY id LIMIT %s",
+                              (chat_id, count)).fetchall()
 
     def title_chat(self, chat_id: int, title: str) -> None:
         """Name a chat after its first message, unless it has a name already."""

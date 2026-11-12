@@ -83,6 +83,27 @@ def chat_title(text: str, photo: bool) -> str:
     return words if len(words) <= limit else words[:limit - 1].rstrip() + "…"
 
 
+NAME_PROMPT = """Here is the start of a private chat between {name} and {her}, {name}'s girlfriend.
+
+{transcript}
+
+Give this chat a short name, two to five words, the way someone would label it in their chat list: what it is
+about or its mood, such as "Rainy Sunday plans" or "Missing you tonight". Answer with the name only: no quotes,
+no full stop, no emoji, no explanation."""
+NAME_WORDS = 6
+# How often chats that could not be named are tried again.
+NAME_RECHECK_SECONDS = 600
+
+
+def clean_name(reply: str) -> str:
+    """The model's name for a chat, as one short line; '' if it gave nothing usable."""
+    line = next((line for line in reply.splitlines() if line.strip()), "")
+    line = line.strip().strip("\"'`*#").removeprefix("Name:").strip().strip("\"'`*").rstrip(".!")
+    words = line.split()[:NAME_WORDS]
+    name = " ".join(words)
+    return chat_title(name, False) if name else ""
+
+
 def model_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The conversation as the chat model reads it: photos and pictures become notes in brackets.
 
@@ -182,6 +203,53 @@ class Conversation:
                 await asyncio.to_thread(self.store.set_photo_note, sent["id"], note)
             async for event in self.answer(companion, chat_id, name, timezone):
                 yield event
+            if chat["named"] == "":
+                # Her first answer is in: name the chat after how it began.
+                named = await self.name_chat(chat_id, companion["name"], name)
+                if named:
+                    yield {"type": "chat", "chat": serialize_chat(named)}
+
+    async def name_chat(self, chat_id: int, her: str, name: str = "You") -> dict[str, Any] | None:
+        """A short name for a chat from its first messages, by the chat model; None if it gave none."""
+        rows = await asyncio.to_thread(self.store.opening, chat_id)
+        lines = []
+        for row in rows:
+            content = " ".join((row["content"] or "").split())[:300] or ("(a photo)" if row["image_id"] else "")
+            if content:
+                lines.append(f"{her if row['role'] == 'luna' else name}: {content}")
+        if not lines:
+            return None
+        try:
+            reply = await self.ollama.complete(NAME_PROMPT.format(name=name, her=her, transcript="\n".join(lines)))
+        except Exception as error:  # noqa: BLE001 - the first message stays its name
+            logger.warning("Could not name chat %s: %s", chat_id, error)
+            return None
+        title = clean_name(reply)
+        return await asyncio.to_thread(self.store.name_chat, chat_id, title) if title else None
+
+    async def name_old_chats(self) -> None:
+        """Keep naming chats that have no name yet: those from before chats were named, and any the model missed."""
+        while True:
+            try:
+                await self.name_waiting_chats()
+            except Exception:  # noqa: BLE001 - tried again later
+                logger.exception("Naming old chats failed")
+            await asyncio.sleep(NAME_RECHECK_SECONDS)
+
+    async def name_waiting_chats(self) -> None:
+        """Name each chat without a name, one at a time, between her replies.
+
+        A chat whose name is not its first message was renamed by the owner, so it keeps it.
+        """
+        for chat in await asyncio.to_thread(self.store.unnamed_chats):
+            first = next(iter(await asyncio.to_thread(self.store.opening, chat["id"], 1)), None)
+            stand_in = chat_title(first["content"] or "", bool(first["image_id"])) if first else ""
+            if chat["title"] and chat["title"] != stand_in:
+                await asyncio.to_thread(self.store.keep_name, chat["id"])
+                continue
+            companion = await asyncio.to_thread(self.store.companion, chat["companion_id"])
+            async with self.turn:
+                await self.name_chat(chat["id"], companion["name"] if companion else "Luna")
 
     def now(self, timezone: str | None) -> datetime:
         try:

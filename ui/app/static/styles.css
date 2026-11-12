@@ -94,6 +94,8 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-field { display: grid; gap: 0.35rem; }
 .sc-field > span { font-size: var(--luna-text-small); color: var(--lv-muted); }
 .sc-field em { font-style: normal; opacity: 0.7; }
+.sc-check { display: flex; gap: 0.5rem; align-items: flex-start; margin-top: 0.75rem; font-size: var(--luna-text-small); }
+.sc-check em { font-style: normal; }
 .sc-field input, .sc-field textarea, .sc-choice select {
   width: 100%; padding: 0.6rem 0.75rem; border: 1px solid var(--lv-border); border-radius: 0.7rem;
   background: var(--lv-control); resize: vertical;
@@ -198,8 +200,16 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-luna .sc-bubble { background: var(--sc-luna); border-bottom-left-radius: 0.35rem; }
 .sc-picture { display: block; max-width: 100%; width: 20rem; border-radius: 1rem; margin-bottom: 0.25rem; cursor: zoom-in; background: var(--lv-control); }
 .sc-meta { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.15rem; color: var(--lv-muted); font-size: 0.68rem; }
-.sc-play { padding: 0; border: 0; background: none; color: var(--lv-muted); cursor: pointer; font-size: 0.68rem; text-decoration: underline; }
-a.sc-play { text-decoration: underline; }
+.sc-meta-action { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--lv-muted); cursor: pointer; }
+.sc-meta-action:hover { background: var(--lv-control-hover); color: var(--lv-text); }
+.sc-bubble-row { display: flex; align-items: flex-end; gap: 0.25rem; max-width: 100%; }
+.sc-bubble-row .sc-bubble { min-width: 0; }
+.sc-bubble-row .sc-meta-action { flex: 0 0 auto; }
+.sc-figure { position: relative; max-width: 100%; }
+/* On the picture itself, so it is drawn light on dark in either theme. */
+.sc-picture-save { position: absolute; top: 0.5rem; right: 0.5rem; width: 2rem; height: 2rem; background: rgb(0 0 0 / 0.55); color: #fff; }
+.sc-picture-save:hover { background: rgb(0 0 0 / 0.75); color: #fff; }
+.sc-meta-action:focus-visible { outline: 2px solid var(--lv-text); outline-offset: 1px; }
 .sc-lightbox-save { position: fixed; bottom: 1.25rem; left: 50%; transform: translateX(-50%); padding: 0.5rem 1.1rem; border-radius: 999px; background: var(--lv-panel, #222); color: var(--lv-text, #fff); text-decoration: none; font-size: var(--luna-text-small, 0.85rem); }
 .sc-delete { opacity: 0; transition: opacity 0.15s; }
 .sc-message:hover .sc-delete, .sc-message:focus-within .sc-delete { opacity: 1; }
@@ -226,6 +236,7 @@ a.sc-play { text-decoration: underline; }
 .sc-row textarea {
   flex: 1; min-width: 0; max-height: 9rem; resize: none; padding: 0.6rem 0.9rem;
   border: 1px solid var(--lv-border); border-radius: 1.3rem; background: var(--lv-control); line-height: 1.35;
+  overflow-y: hidden; scrollbar-width: thin;
 }
 .sc-row textarea:focus { outline: none; border-color: var(--lv-strong); }
 .sc-send { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; flex: 0 0 auto; border: 0; border-radius: 50%; background: var(--lv-accent); color: #111; cursor: pointer; }
@@ -294,6 +305,7 @@ a.sc-play { text-decoration: underline; }
 .sc-chat-open strong, .sc-chat-open span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sc-chat-open strong { font-weight: 600; }
 .sc-chat-open span { color: var(--lv-muted); font-size: var(--luna-text-small); }
+.sc-chat-open small { display: block; color: var(--lv-muted); font-size: 0.72rem; letter-spacing: 0.01em; }
 .sc-chat-item .sc-icon { width: 2rem; height: 2rem; opacity: 0; }
 .sc-chat-item:hover .sc-icon, .sc-chat-item:focus-within .sc-icon, .sc-chat-item[aria-current="true"] .sc-icon { opacity: 1; }
 @media (hover: none) { .sc-chat-item .sc-icon { opacity: 1; } }

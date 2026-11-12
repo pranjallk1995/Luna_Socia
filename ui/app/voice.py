@@ -14,6 +14,7 @@ import urllib.request
 from pathlib import Path
 
 from app.config import SociaConfig
+from app.model_usage import ModelUsage
 
 KOKORO_RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 KOKORO_FILES = ("kokoro-v1.0.onnx", "voices-v1.0.bin")
@@ -55,9 +56,20 @@ class Voice:
         self.lock = threading.Lock()
         self.whisper = None
         self.kokoro = None
+        # For Luna Sentia's model monitor, which cannot see models that run outside Ollama.
+        self.hearing = ModelUsage(f"Whisper {config.stt_model} (faster-whisper)",
+                                  "Hears voice messages: speech to text", lambda: self._state(self.whisper, "int8"))
+        self.speaking = ModelUsage("Kokoro 82M (kokoro-onnx)", "Her voice: reads her replies aloud",
+                                   lambda: self._state(self.kokoro, "ONNX"))
+
+    @staticmethod
+    def _state(model, runtime: str) -> tuple[bool, str]:
+        if model is None:
+            return False, "loads on first use (CPU); stays loaded"
+        return True, f"CPU ({runtime})"
 
     def transcribe(self, audio: bytes) -> str:
-        with self.lock:
+        with self.lock, self.hearing.record():
             if self.whisper is None:
                 from faster_whisper import WhisperModel
 
@@ -86,7 +98,7 @@ class Voice:
         """A WAV file of her saying ``text`` in ``voice`` (a Kokoro voice id)."""
         import soundfile
 
-        with self.lock:
+        with self.lock, self.speaking.record():
             if self.kokoro is None:
                 from kokoro_onnx import Kokoro
 

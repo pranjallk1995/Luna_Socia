@@ -276,6 +276,7 @@ async function openEditor(her) {
   $("her-name").maxLength = options.limits.name;
   $("her-about").value = her?.persona.about ?? "";
   $("her-about").maxLength = options.limits.about;
+  $("her-nude").checked = her?.persona.nude_pictures === "on";
   $("her-memory").value = her?.memory ?? "";
   $("her-memory").maxLength = options.limits.memory;
   $("memory-field").hidden = !her;
@@ -355,7 +356,8 @@ async function saveEditor(event) {
   const save = $("editor-save");
   save.disabled = true;
   const label = save.textContent;
-  const persona = { ...draft.persona, about: $("her-about").value, language: $("her-language").value };
+  const nude = $("her-nude").checked ? "on" : "off";
+  const persona = { ...draft.persona, about: $("her-about").value, language: $("her-language").value, nude_pictures: nude };
   const body = { name, persona, voice: draft.voice };
   if (draft.her && $("her-memory").value !== (draft.her.memory ?? "")) body.memory = $("her-memory").value;
   let her = draft.her;
@@ -370,6 +372,9 @@ async function saveEditor(event) {
       const form = new FormData();
       form.append("photo", draft.picture);
       await json(`${herApi(her.id)}/profile`, { method: "POST", body: form });
+      // A new picture turns nude pictures off; ticked in this same save, the owner confirmed the new face.
+      if (nude === "on") her = (await json(herApi(her.id), { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ persona: { nude_pictures: "on" } }) })).companion;
     }
     if (draft.exportFile) {
       const form = new FormData();
@@ -422,6 +427,7 @@ function wireEditor() {
     const file = $("her-picture").files[0];
     if (!file) return;
     draft.picture = file;
+    $("her-nude").checked = false;
     setPicture(URL.createObjectURL(file));
     $("her-picture-label").textContent = "Choose another picture";
   });
@@ -546,15 +552,51 @@ function lightbox(url) {
 function messageElement(message) {
   const element = document.createElement("div");
   element.className = `sc-message sc-${message.role}`;
-  if (message.image_url) element.append(picture(message.image_url));
+  if (message.image_url) {
+    // The picture with its download button in the corner; saved with the date in its name.
+    const figure = document.createElement("div");
+    figure.className = "sc-figure";
+    const save = metaAction("a", "download", "Download this picture");
+    save.classList.add("sc-picture-save");
+    save.href = `${message.image_url}?download=1`;
+    figure.append(picture(message.image_url), save);
+    element.append(figure);
+  }
   if (message.content) {
+    const row = document.createElement("div");
+    row.className = "sc-bubble-row";
     const bubble = document.createElement("div");
     bubble.className = "sc-bubble";
     bubble.textContent = message.content;
-    element.append(bubble);
+    row.append(bubble);
+    if (message.role === "luna" && message.id) {
+      // Her voice, right beside what she said.
+      const play = metaAction("button", "play", "Play her voice");
+      play.addEventListener("click", () => speak(message.id));
+      row.append(play);
+    }
+    element.append(row);
   }
   element.append(meta(message));
   return element;
+}
+
+// A message's small icon buttons (voice, download, delete), in the page's own line style.
+const META_ICONS = {
+  play: '<path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/>',
+  download: '<path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/>',
+  delete: '<path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
+};
+
+function metaAction(tag, icon, label) {
+  const action = document.createElement(tag);
+  if (tag === "button") action.type = "button";
+  action.className = `sc-meta-action sc-${icon}`;
+  action.title = label;
+  action.setAttribute("aria-label", label);
+  action.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" `
+    + `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${META_ICONS[icon]}</svg>`;
+  return action;
 }
 
 function meta(message) {
@@ -562,29 +604,8 @@ function meta(message) {
   line.className = "sc-meta";
   const time = new Date(message.created_at);
   line.append(time.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }));
-  if (message.role === "luna" && message.content && message.id) {
-    const play = document.createElement("button");
-    play.type = "button";
-    play.className = "sc-play";
-    play.textContent = "play";
-    play.addEventListener("click", () => speak(message.id));
-    line.append(play);
-  }
-  if (message.image_url) {
-    // Her pictures and your photos, saved as files with the date in their name.
-    const save = document.createElement("a");
-    save.className = "sc-play";
-    save.href = `${message.image_url}?download=1`;
-    save.textContent = "download";
-    save.setAttribute("aria-label", "Download this picture");
-    line.append(save);
-  }
   if (message.id) {
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "sc-play sc-delete";
-    remove.textContent = "delete";
-    remove.setAttribute("aria-label", "Delete this message");
+    const remove = metaAction("button", "delete", "Delete this message");
     remove.addEventListener("click", (event) => deleteMessage(message.id, event.currentTarget.closest(".sc-message")));
     line.append(remove);
   }
@@ -654,9 +675,15 @@ async function loadMessages(before) {
 }
 
 // Chats: each is its own conversation with her, and every one is kept.
+function startedLabel(iso) {
+  const date = new Date(iso);
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return `Started ${date.toLocaleDateString(undefined, { day: "numeric", month: "short", ...(sameYear ? {} : { year: "numeric" }) })}`;
+}
+
 function showChat(chat) {
   state.chat = chat;
-  $("chat-title").textContent = chat ? chat.title : "";
+  $("chat-title").textContent = chat ? `${chat.title} · ${startedLabel(chat.created_at)}` : "";
   document.title = chat ? `${chat.title} · ${state.her.name}` : `${state.her.name} · Luna Socia`;
   $("delete-chat").hidden = !chat;
   try {
@@ -710,7 +737,9 @@ async function loadChats() {
     title.textContent = chat.title;
     const line = document.createElement("span");
     line.textContent = [chatTime(chat.updated_at), chat.last].filter(Boolean).join(" · ");
-    open.append(title, line);
+    const started = document.createElement("small");
+    started.textContent = startedLabel(chat.created_at);
+    open.append(title, started, line);
     open.addEventListener("click", () => openChat(chat));
     const rename = document.createElement("button");
     rename.type = "button";
@@ -927,9 +956,13 @@ function clearPhoto() {
   $("attachment").hidden = true;
 }
 
+// The message box grows with what you type, borders included, so it never shows a
+// scrollbar until it reaches its tallest (9rem).
 function resize() {
   text.style.height = "auto";
-  text.style.height = `${text.scrollHeight}px`;
+  const borders = text.offsetHeight - text.clientHeight;
+  text.style.height = `${text.scrollHeight + borders}px`;
+  text.style.overflowY = text.scrollHeight > text.clientHeight ? "auto" : "hidden";
 }
 
 async function loadProfile() {

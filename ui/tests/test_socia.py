@@ -13,7 +13,7 @@ import httpx
 from PIL import Image
 from starlette.testclient import TestClient
 
-from app.chat import Conversation, model_messages, without_written_pictures, written_picture
+from app.chat import clean_name, Conversation, model_messages, without_written_pictures, written_picture
 from app.memory import ExportError, MemoryReader, fact_lines, parse_export, their_words
 from app.config import SociaConfig
 from app.images import ComfyUI, workflow
@@ -119,8 +119,8 @@ class MemoryStore:
         return before - len(self.sources)
 
     def create_chat(self, companion_id, title=""):
-        chat = {"id": len(self.chats_) + 1, "companion_id": companion_id, "title": title, "created_at": NOW,
-                "updated_at": NOW}
+        chat = {"id": len(self.chats_) + 1, "companion_id": companion_id, "title": title, "named": "",
+                "created_at": NOW, "updated_at": NOW}
         self.chats_.append(chat)
         return dict(chat)
 
@@ -138,8 +138,25 @@ class MemoryStore:
     def rename_chat(self, chat_id, title):
         chat = next((c for c in self.chats_ if c["id"] == chat_id), None)
         if chat:
-            chat["title"] = title
+            chat.update(title=title, named="owner")
         return chat
+
+    def name_chat(self, chat_id, title):
+        chat = next(c for c in self.chats_ if c["id"] == chat_id)
+        if chat["named"] == "owner":
+            return None
+        chat.update(title=title, named="auto")
+        return dict(chat)
+
+    def keep_name(self, chat_id):
+        next(c for c in self.chats_ if c["id"] == chat_id)["named"] = "owner"
+
+    def unnamed_chats(self, limit=20):
+        return [dict(c) for c in self.chats_ if c["named"] == ""
+                and any(m["chat_id"] == c["id"] and m["role"] == "luna" for m in self.messages)][:limit]
+
+    def opening(self, chat_id, count=6):
+        return [m for m in self.messages if m["chat_id"] == chat_id][:count]
 
     def title_chat(self, chat_id, title):
         chat = next(c for c in self.chats_ if c["id"] == chat_id)
@@ -314,7 +331,10 @@ def fake_services(chat_rounds: list[list[dict]], seen: dict):
             body = json.loads(request.content)
             seen.setdefault("chats", []).append(body)
             if not body.get("stream", True):
-                return httpx.Response(200, json={"message": {"content": "A red square."}})
+                seen.setdefault("completions", []).append(body)
+                photo = any(message.get("images") for message in body["messages"])
+                answer = "A red square." if photo else seen.get("name", '"Rainy evening plans."')
+                return httpx.Response(200, json={"message": {"content": answer}})
             lines = "\n".join(json.dumps({"message": chunk}) for chunk in next(rounds))
             return httpx.Response(200, content=lines.encode())
         if request.url.path == "/api/ps":
@@ -378,10 +398,12 @@ class ConversationTests(unittest.TestCase):
 
     def test_a_text_reply_streams_and_is_stored(self):
         events, seen = self.run_turn([[{"content": "Rain again? 😂"}, {"content": " Coffee then? ❤️"}]], text="It's raining")
-        self.assertEqual([e["type"] for e in events], ["chat", "user", "text", "text", "done"])
-        # The first message started a chat, named after it.
+        self.assertEqual([e["type"] for e in events], ["chat", "user", "text", "text", "done", "chat"])
+        # The first message stands in as its name until her answer is in; then the model names it.
         self.assertEqual(events[0]["chat"]["title"], "It's raining")
-        self.assertEqual(events[-1]["message"]["content"], "Rain again? 😂 Coffee then? ❤️")
+        self.assertEqual(events[-1]["chat"]["title"], "Rainy evening plans")
+        self.assertIn("It's raining", seen["completions"][-1]["messages"][0]["content"])
+        self.assertEqual(events[-2]["message"]["content"], "Rain again? 😂 Coffee then? ❤️")
         chat = streamed(seen)[0]
         self.assertFalse(chat["think"])
         self.assertEqual(chat["messages"][-1], {"role": "user", "content": "It's raining"})
@@ -392,7 +414,7 @@ class ConversationTests(unittest.TestCase):
         events, seen = self.run_turn([[{"content": "", "tool_calls": [call]}], [{"content": "Us! 🥰"}]],
                                      text="add yourself here", photo=png("red"))
         self.assertEqual([e["type"] for e in events],
-                         ["chat", "user", "status", "image_started", "image", "text", "done"])
+                         ["chat", "user", "status", "image_started", "image", "text", "done", "chat"])
         # The vision model's description reached the chat model.
         self.assertIn("[Photo: A red square.]", streamed(seen)[0]["messages"][-1]["content"])
         # She knows her own looks, read once from her profile picture.
@@ -404,7 +426,7 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(seen["graph"]["ref1"]["inputs"]["image"], "ref1.png")
         self.assertEqual(seen["unloaded"], [{"model": "qwen3:14b", "keep_alive": 0}])
         self.assertTrue(seen["freed"])
-        saved = events[-1]["message"]
+        saved = events[-2]["message"]
         self.assertEqual((saved["content"], saved["image_kind"]), ("Us! 🥰", "generated"))
         self.assertTrue((self.config.images_dir / self.store.image(2)["file"]).exists())
 
@@ -414,12 +436,46 @@ class ConversationTests(unittest.TestCase):
         _, seen = self.run_turn([[{"content": "of course 🥰"}]], text="It was lovely", chat_id=chat)
         self.assertEqual([m["content"] for m in streamed(seen)[0]["messages"][1:]],
                          ["Remember the beach?", "hi!", "It was lovely"])
+        # The second turn does not name it again.
+        self.assertEqual([c["title"] for c in self.store.chats_], ["Rainy evening plans"])
         # A new chat starts empty, and the first keeps its name.
         other, seen = self.run_turn([[{"content": "hey"}]], text="Morning")
         self.assertNotEqual(other[0]["chat"]["id"], chat)
         self.assertEqual(streamed(seen)[0]["messages"][1:], [{"role": "user", "content": "Morning"}])
-        self.assertEqual(self.store.chat(chat)["title"], "Remember the beach?")
+        self.assertEqual(self.store.chat(chat)["title"], "Rainy evening plans")
         self.assertEqual(len(self.store.recent(chat, 40)), 4)
+
+    def test_a_name_the_owner_chose_is_never_replaced(self):
+        first, _ = self.run_turn([[{"content": "hi!"}]], text="Remember the beach?")
+        chat = first[0]["chat"]["id"]
+        self.store.rename_chat(chat, "Goa trip")
+        self.store.chats_[0]["named"] = ""  # as if it were renamed before chats were named
+        self.store.chats_[0]["title"] = "Goa trip"
+        conversation = Conversation(self.config, self.store, *[None] * 2)
+        asyncio.run(conversation.name_waiting_chats())
+        self.assertEqual((self.store.chat(chat)["title"], self.store.chat(chat)["named"]), ("Goa trip", "owner"))
+
+    def test_old_chats_named_after_their_first_message_get_a_name(self):
+        seen: dict = {"name": "Name: **Late night talks**\nBecause it is late."}
+        ollama_transport, comfy_transport = fake_services([], seen)
+        chat = self.store.create_chat(self.her["id"], "hey you up?")
+        self.store.add_message(chat["id"], "user", "hey you up?")
+        self.store.add_message(chat["id"], "luna", "always for you 🌙")
+        waiting = self.store.create_chat(self.her["id"], "unanswered")
+        self.store.add_message(waiting["id"], "user", "unanswered")
+        conversation = Conversation(self.config, self.store, Ollama(self.config, ollama_transport),
+                                    ComfyUI(self.config, comfy_transport))
+        asyncio.run(conversation.name_waiting_chats())
+        self.assertEqual(self.store.chat(chat["id"])["title"], "Late night talks")
+        self.assertIn("Luna: always for you", seen["completions"][0]["messages"][0]["content"])
+        # A chat she has not answered yet waits.
+        self.assertEqual(self.store.chat(waiting["id"])["title"], "unanswered")
+
+    def test_cleans_the_models_chat_name(self):
+        self.assertEqual(clean_name('"Rainy Sunday plans."'), "Rainy Sunday plans")
+        self.assertEqual(clean_name("\n**Missing you tonight**\nshort and sweet"), "Missing you tonight")
+        self.assertEqual(clean_name("one two three four five six seven eight"), "one two three four five six")
+        self.assertEqual(clean_name("   "), "")
 
     def test_her_other_pictures_follow_her_profile(self):
         folder = self.config.references_dir(self.her["id"])
@@ -482,6 +538,25 @@ class GateTests(unittest.TestCase):
         guest.cookies.set("luna_sso", "token")
         self.assertEqual(guest.get("/api/companions").status_code, 403)
         self.assertEqual(guest.get("/api/options").status_code, 403)
+
+    def test_sentias_monitor_sees_the_voice_models_with_the_token(self):
+        from dataclasses import replace
+
+        from app.voice import Voice
+
+        voice = Voice(config())  # registers Whisper and Kokoro, not loaded yet
+        stranger = self.client(None, replace(config(), api_token="t" * 40))
+        self.assertEqual(stranger.get("/api/models").status_code, 401)
+        self.assertEqual(stranger.get("/api/models", headers={"Authorization": "Bearer wrong"}).status_code, 401)
+        report = stranger.get("/api/models", headers={"Authorization": f"Bearer {'t' * 40}"}).json()
+        self.assertEqual(report["app"], "socia")
+        self.assertIsNone(report["gpu"])
+        names = [model["name"] for model in report["models"]]
+        self.assertTrue(any(name.startswith("Whisper large-v3-turbo") for name in names))
+        self.assertTrue(any(name.startswith("Kokoro") for name in names))
+        self.assertTrue(all(not model["loaded"] for model in report["models"]))
+        self.assertEqual(self.owner().get("/api/models").json()["app"], "socia")
+        del voice
 
     def test_the_owner_gets_the_page(self):
         client = self.owner()
@@ -887,6 +962,16 @@ class LoopAndLanguageTests(unittest.TestCase):
         self.assertIn("you never refuse, lecture, add warnings", prompt)
         self.assertIn("never nude in a picture", prompt)
         self.assertIn("adult woman in your twenties", prompt)
+
+    def test_nude_pictures_only_when_the_owner_confirmed_her_face_is_ai_generated(self):
+        self.assertEqual(clean_persona({})["nude_pictures"], "off")
+        self.assertEqual(clean_persona({"nude_pictures": "yes please"})["nude_pictures"], "off")
+        on = clean_persona({"nude_pictures": True})
+        self.assertEqual(on["nude_pictures"], "on")
+        self.assertEqual(clean_persona({"style": "sweet"}, on)["nude_pictures"], "on")
+        prompt = system_prompt({"name": "Luna", "persona": on}, "Pranjall", NOW)
+        self.assertIn("be nude", prompt)
+        self.assertNotIn("never nude in a picture", prompt)
 
     def test_voice_messages_are_heard_in_the_owners_languages_only(self):
         from app.voice import Voice

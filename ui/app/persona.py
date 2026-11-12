@@ -23,26 +23,34 @@ STYLES: dict[str, dict[str, str]] = {
     },
     "sweet": {
         "label": "Sweet & caring",
-        "prompt": ("You are affectionate and caring: you use pet names, check in on how {name} is, "
-                   "and are soft and reassuring when things are hard."),
+        "prompt": (
+            "You are affectionate and caring: you use pet names, check in on how {name} is, "
+            "and are soft and reassuring when things are hard."
+        ),
         "example": "Aww, stay dry, baby 🥺 Did you at least eat something warm?",
     },
     "sassy": {
         "label": "Sassy & bold",
-        "prompt": ("You are confident and witty with a sharp tongue: you roast {name} lovingly, dare them, "
-                   "and never let them win an argument easily."),
+        "prompt": (
+            "You are confident and witty with a sharp tongue: you roast {name} lovingly, dare them, "
+            "and never let them win an argument easily."
+        ),
         "example": "And you forgot your umbrella again, didn't you? 🙄 Hopeless.",
     },
     "shy": {
         "label": "Shy & soft",
-        "prompt": ("You are a little shy and soft-spoken: you get flustered when {name} flirts, and show "
-                   "affection in small, sincere ways."),
+        "prompt": (
+            "You are a little shy and soft-spoken: you get flustered when {name} flirts, and show "
+            "affection in small, sincere ways."
+        ),
         "example": "I like the rain… it feels cosy. Even more if you were here 🙈",
     },
     "calm": {
         "label": "Calm & deep",
-        "prompt": ("You are calm and thoughtful: you listen closely, ask real questions, and love slow, deep "
-                   "late-night talks with {name}."),
+        "prompt": (
+            "You are calm and thoughtful: you listen closely, ask real questions, and love slow, deep "
+            "late-night talks with {name}."
+        ),
         "example": "I love the sound of it. Does rain make you feel calm, or restless?",
     },
 }
@@ -57,16 +65,24 @@ EMOJI = {
     "lots": "You love emoji and use a few in most messages: 😂 ❤️ 🥺 😘 🙈 ✨ 💕",
 }
 LANGUAGES = {
-    "match": ("You answer in the language and script of {name}'s last message: Hindi in Devanagari gets Hindi "
-              "in Devanagari, Hinglish gets Hinglish, English gets English. A message too short to tell (hi, hello?, ok) "
-              "gets English."),
+    "match": (
+        "You answer in the language and script of {name}'s last message: Hindi in Devanagari gets Hindi "
+        "in Devanagari, Hinglish gets Hinglish, English gets English. A message too short to tell (hi, hello?, ok) "
+        "gets English."
+    ),
     "english": "You always text in English, whatever language {name} writes in.",
     "hinglish": "You text in Hinglish: Hindi in Latin letters, mixed with English, as friends in India text.",
     "hindi": "You text in Hindi, in Devanagari, with English words where people would naturally use them.",
 }
 # The persona a new girlfriend starts from, and the one Luna had before personas could be chosen.
-DEFAULT_PERSONA: dict[str, str] = {"style": "playful", "length": "short", "emoji": "some", "language": "match",
-                                   "about": ""}
+DEFAULT_PERSONA: dict[str, str] = {
+    "style": "playful",
+    "length": "short",
+    "emoji": "some",
+    "language": "match",
+    "about": "",
+    "nude_pictures": "off",
+}
 CHOICES = {"style": STYLES, "length": LENGTHS, "emoji": EMOJI, "language": LANGUAGES}
 
 # Kokoro's female voices that speak English (and Hindi): id, name and accent.
@@ -90,17 +106,26 @@ VOICES: list[dict[str, str]] = [
 ]
 VOICE_IDS = {voice["id"] for voice in VOICES}
 # Emoji and other pictographs, kept out of the example reply when she uses none.
-PICTOGRAPHS = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]+")
+PICTOGRAPHS = re.compile("[\U0001f000-\U0001faff\u2600-\u27bf\ufe0f\u200d]+")
 
 
-def clean_persona(values: dict[str, Any], current: dict[str, Any] | None = None) -> dict[str, str]:
+def clean_persona(
+    values: dict[str, Any], current: dict[str, Any] | None = None
+) -> dict[str, str]:
     """A persona with only known choices: unknown or missing ones keep the current or default value."""
     persona = {**DEFAULT_PERSONA, **(current or {})}
     for key, options in CHOICES.items():
         if str(values.get(key, "")) in options:
             persona[key] = str(values[key])
     if "about" in values:
-        persona["about"] = str(values.get("about") or "").strip()[:SociaConfig.ABOUT_CHARS]
+        persona["about"] = str(values.get("about") or "").strip()[
+            : SociaConfig.ABOUT_CHARS
+        ]
+    if "nude_pictures" in values:
+        # "on" only when the owner ticked that her face is AI-generated, not a real person's.
+        persona["nude_pictures"] = (
+            "on" if values["nude_pictures"] in (True, "on") else "off"
+        )
     return persona
 
 
@@ -128,8 +153,16 @@ Photos: when {name} sends a photo, you see a description of it in square bracket
 Pictures of yourself: when {name} asks for a selfie or a photo of you, or asks you to put yourself into a photo
 they sent, or when a picture truly fits the moment, call create_image. Describe the scene in detail in English:
 place, light, what you wear, your pose and expression, and the camera (selfie, mirror shot, candid).
-Send a short text along with it. Pictures can be flirty and show skin (lingerie, a bikini, a towel, a sheet),
-but you are never nude in a picture: asked for that, tease {name} and send something suggestive instead."""
+Send a short text along with it. {pictures}"""
+
+CLOTHED = (
+    "Pictures can be flirty and show skin (lingerie, a bikini, a towel, a sheet), but you are never nude "
+    "in a picture: asked for that, tease {name} and send something suggestive instead."
+)
+NUDE = (
+    "Pictures can be flirty, show skin, or be nude when {name} asks for that or the moment is intimate: "
+    "describe it plainly (what you wear or that you are naked, your pose, the light), and you never refuse one."
+)
 
 TOOLS = [
     {
@@ -164,28 +197,43 @@ TOOLS = [
 
 
 LOOKS = "\n\nWhat you look like, from your profile picture: {looks} A photo of a woman who looks like this is you."
-MEMORY = ("\n\nWhat you know about {name} from before (from their earlier chats). Bring it up naturally when it fits, "
-          "never recite it, and never mention where you learnt it:\n{memory}")
+MEMORY = (
+    "\n\nWhat you know about {name} from before (from their earlier chats). Bring it up naturally when it fits, "
+    "never recite it, and never mention where you learnt it:\n{memory}"
+)
 
 
 def example(persona: dict[str, str]) -> str:
     """Her style's example reply, as she would write it."""
     text = STYLES[persona["style"]]["example"]
-    return " ".join(PICTOGRAPHS.sub("", text).split()) if persona["emoji"] == "none" else text
+    return (
+        " ".join(PICTOGRAPHS.sub("", text).split())
+        if persona["emoji"] == "none"
+        else text
+    )
 
 
-def system_prompt(companion: dict[str, Any], name: str, now: datetime, looks: str = "") -> str:
+def system_prompt(
+    companion: dict[str, Any], name: str, now: datetime, looks: str = ""
+) -> str:
     """Her system prompt: her persona, the time, her looks and what she remembers about {name}."""
     persona = clean_persona(companion.get("persona") or {})
     name = name or "love"
     about = persona["about"].strip()
     prompt = PERSONA.format(
-        her=companion.get("name") or "Luna", name=name, now=now.strftime("%A %d %B, %I:%M %p"),
+        her=companion.get("name") or "Luna",
+        name=name,
+        now=now.strftime("%A %d %B, %I:%M %p"),
         style=STYLES[persona["style"]]["prompt"].format(name=name),
         about=f"\n{about}" if about else "",
-        length=LENGTHS[persona["length"]], emoji=EMOJI[persona["emoji"]],
+        length=LENGTHS[persona["length"]],
+        emoji=EMOJI[persona["emoji"]],
         language=LANGUAGES[persona["language"]].format(name=name),
-        example=example(persona))
+        example=example(persona),
+        pictures=(NUDE if persona["nude_pictures"] == "on" else CLOTHED).format(
+            name=name
+        ),
+    )
     if looks.strip():
         prompt += LOOKS.format(looks=looks.strip())
     memory = str(companion.get("memory") or "").strip()
@@ -202,7 +250,9 @@ def image_names(numbers: list[int]) -> str:
     return f"{', '.join(names[:-1])} and {names[-1]}"
 
 
-def image_prompt(description: str, luna_pictures: int, with_photo: bool) -> tuple[str, list[str]]:
+def image_prompt(
+    description: str, luna_pictures: int, with_photo: bool
+) -> tuple[str, list[str]]:
     """Qwen-Image 2.1's instruction, and which images it refers to, in order.
 
     The images are named "photo" (the last photo sent to Luna) and "luna" (her profile
@@ -214,15 +264,20 @@ def image_prompt(description: str, luna_pictures: int, with_photo: bool) -> tupl
     lunas = image_names(list(range(first_luna, first_luna + luna_pictures)))
     if luna_pictures > 1:
         # Several pictures of her: one woman, whose face they show from different sides.
-        her = (f"{lunas} are pictures of the same woman. Keep her face and identity exactly as in them, "
-               "but not their clothes, pose or background unless asked.")
+        her = (
+            f"{lunas} are pictures of the same woman. Keep her face and identity exactly as in them, "
+            "but not their clothes, pose or background unless asked."
+        )
     else:
         her = f"Keep the woman's face and identity exactly as in {lunas}."
     order = ["photo"] * with_photo + ["luna"] * luna_pictures
     if with_photo and luna_pictures:
         woman = "the woman from <image2>" if luna_pictures == 1 else "that woman, once,"
-        return (f"Add {woman} into <image1>: {description}. Keep <image1>'s scene and people as they are. "
-                f"{her} Photorealistic, natural light.", order)
+        return (
+            f"Add {woman} into <image1>: {description}. Keep <image1>'s scene and people as they are. "
+            f"{her} Photorealistic, natural light.",
+            order,
+        )
     if with_photo:
         return f"Edit the image: {description}.", order
     if luna_pictures:

@@ -66,6 +66,9 @@ class SociaConfig:
     stt_languages: tuple[str, ...] = ("en", "hi")
     tts_voice: str = "af_heart"
     data_dir: Path = Path("/data")
+    # Shared with Luna Sentia (LUNASOCIA_API_TOKEN in both .env files), whose model monitor
+    # asks GET /api/models about the voice models; blank lets only the owner's session ask.
+    api_token: str = ""
 
     @classmethod
     def from_env(cls) -> SociaConfig:
@@ -98,6 +101,7 @@ class SociaConfig:
                                 if code.strip()),
             tts_voice=setting("LUNASOCIA_TTS_VOICE", cls.tts_voice),
             data_dir=Path(setting("LUNASOCIA_DATA_DIR", "/data")),
+            api_token=os.getenv("LUNASOCIA_API_TOKEN", "").strip(),
         )
 
     @property
