@@ -91,6 +91,18 @@ Give this chat a short name, two to five words, the way someone would label it i
 about or its mood, such as "Rainy Sunday plans" or "Missing you tonight". Answer with the name only: no quotes,
 no full stop, no emoji, no explanation."""
 NAME_WORDS = 6
+# Words that mean a picture may be on its way, in her reply or the owner's last message.
+PICTURE_HINT = re.compile(
+    r"\b(?:pic|pics|picture|pictures|photo|photos|selfie|snap|nude|nudes|naked|topless|tits|boobs?|show|send|"
+    r"resend|see|here you go|here it is|there!|take it off)\b|here you go|here it is", re.IGNORECASE)
+PROMISE_PROMPT = """The end of a private chat between {name} and {her}, {name}'s girlfriend:
+
+{transcript}
+
+Does {her}'s last message send a picture of herself, or say she is sending or about to send one now? If not,
+answer only NONE. If it does, describe that picture in detail in English, as {her} would for her camera: the place,
+the light, what she wears (or that she is naked, if that is what was asked for), her pose and expression, and the
+camera (selfie, mirror shot, candid). Answer only the description, starting with "I"."""
 # How often chats that could not be named are tried again.
 NAME_RECHECK_SECONDS = 600
 
@@ -295,6 +307,9 @@ class Conversation:
         if call is None:
             call = written_picture(text)
         text = without_written_pictures(text)
+        if call is None and rows and PICTURE_HINT.search(f"{rows[-1]['content'] or ''}\n{text}"):
+            # She said a picture is coming but did not take it: ask what she meant to send, and take that.
+            call = await self.promised_picture(companion["name"], name, rows, text)
         if call:
             arguments = call["function"].get("arguments") or {}
             if isinstance(arguments, str):
@@ -320,6 +335,23 @@ class Conversation:
 
         saved = await asyncio.to_thread(self.store.add_message, chat_id, "luna", text.strip(), image_id)
         yield {"type": "done", "message": serialize(saved)}
+
+    async def promised_picture(self, her: str, name: str, rows: list[dict[str, Any]],
+                               text: str) -> dict[str, Any] | None:
+        """A create_image call for the picture her reply promises, or None if it promises none."""
+        lines = [f"{her if row['role'] == 'luna' else name}: {' '.join((row['content'] or '').split())[:300]}"
+                 for row in rows[-6:] if row["content"]]
+        lines.append(f"{her}: {' '.join(text.split())}")
+        try:
+            answer = await self.ollama.complete(PROMISE_PROMPT.format(her=her, name=name, transcript="\n".join(lines)))
+        except Exception as error:  # noqa: BLE001 - her text alone goes out
+            logger.warning("Could not check for a promised picture: %s", error)
+            return None
+        answer = answer.strip().strip('"')
+        if len(answer) < 20 or answer.upper().startswith("NONE"):
+            return None
+        return {"function": {"name": "create_image", "arguments": {
+            "description": answer, "include_luna": True, "use_their_photo": False}}}
 
     async def picture(self, companion_id: int, chat_id: int, arguments: dict[str, Any]) -> int:
         description = str(arguments.get("description") or "").strip() or "a cosy selfie"

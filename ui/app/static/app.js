@@ -518,6 +518,19 @@ function toBottom() {
   thread.scrollTop = thread.scrollHeight;
 }
 
+// The on-screen keyboard: browsers that ignore the viewport's interactive-widget hint (Safari)
+// only shrink the visual viewport, so the chat is sized to it to keep the composer above the keys.
+if (window.visualViewport) {
+  const fit = () => {
+    const stick = nearBottom();
+    document.documentElement.style.setProperty("--sc-viewport", `${window.visualViewport.height}px`);
+    if (document.activeElement === text) window.scrollTo(0, 0);
+    if (stick) toBottom();
+  };
+  window.visualViewport.addEventListener("resize", fit);
+  fit();
+}
+
 function dayLabel(date) {
   const today = new Date();
   const yesterday = new Date(Date.now() - 86400000);

@@ -382,8 +382,8 @@ class ConversationTests(unittest.TestCase):
     def tearDown(self):
         self.folder.cleanup()
 
-    def run_turn(self, rounds, text="", photo=None, chat_id=None, her=None):
-        seen: dict = {}
+    def run_turn(self, rounds, text="", photo=None, chat_id=None, her=None, completion=None):
+        seen: dict = {"name": completion} if completion else {}
         ollama_transport, comfy_transport = fake_services(rounds, seen)
         conversation = Conversation(self.config, self.store, Ollama(self.config, ollama_transport),
                                     ComfyUI(self.config, comfy_transport))
@@ -395,6 +395,22 @@ class ConversationTests(unittest.TestCase):
         import app.images
         app.images.POLL_SECONDS = 0
         return asyncio.run(collect()), seen
+
+    def test_a_picture_she_promises_but_does_not_take_is_taken(self):
+        description = "I lie on my bed under a warm lamp, a mirror selfie, smiling at you."
+        events, seen = self.run_turn([[{"content": "Here you go 😘"}]], text="send me one please", completion=description)
+        checks = [c for c in seen["completions"] if "Does Luna's last message send a picture" in c["messages"][0]["content"]]
+        self.assertEqual(len(checks), 1)
+        self.assertIn("Luna: Here you go 😘", checks[0]["messages"][0]["content"])
+        self.assertIn("image", [event["type"] for event in events])
+        self.assertIn("graph", seen)
+
+    def test_no_picture_when_she_promises_none_or_nothing_hints_at_one(self):
+        events, seen = self.run_turn([[{"content": "Not now, later 😘"}]], text="send me one", completion="NONE")
+        self.assertNotIn("image", [event["type"] for event in events])
+        self.assertNotIn("graph", seen)
+        events, seen = self.run_turn([[{"content": "Coffee then? ❤️"}]], text="It's raining")
+        self.assertFalse(any("Does Luna's last message" in c["messages"][0]["content"] for c in seen.get("completions", [])))
 
     def test_a_text_reply_streams_and_is_stored(self):
         events, seen = self.run_turn([[{"content": "Rain again? 😂"}, {"content": " Coffee then? ❤️"}]], text="It's raining")
@@ -609,6 +625,34 @@ class GateTests(unittest.TestCase):
             # Another girlfriend has her own pictures.
             other = self.store.create_companion("Maya", {}, "bf_emma")
             self.assertEqual(client.get(f"/api/companions/{other['id']}/references").json()["references"], [])
+
+    def test_a_slow_answer_keeps_the_page_connected_and_a_failed_one_says_so(self):
+        import app.web as web
+
+        async def slow(*args):
+            yield {"type": "image_started"}
+            await asyncio.sleep(0.2)
+            yield {"type": "done"}
+
+        async def broken(*args):
+            yield {"type": "image_started"}
+            raise RuntimeError("camera fell")
+
+        client = self.owner()
+        her = self.store.create_companion("Luna", {}, "af_heart")
+        conversation = next(r.endpoint for r in client.app.routes if getattr(r, "path", "") == "/api/send")
+        cells = dict(zip(conversation.__code__.co_freevars, (c.cell_contents for c in conversation.__closure__)))
+        keepalive, web.KEEPALIVE_SECONDS = web.KEEPALIVE_SECONDS, 0.05
+        try:
+            cells["conversation"].send = slow
+            body = client.post("/api/send", data={"text": "a picture?", "companion_id": str(her["id"])}).text
+            self.assertIn(": still here", body)
+            self.assertTrue(body.endswith('data: {"type": "done"}\n\n'))
+            cells["conversation"].send = broken
+            body = client.post("/api/send", data={"text": "again?", "companion_id": str(her["id"])}).text
+            self.assertIn("Luna could not answer: camera fell", body)
+        finally:
+            web.KEEPALIVE_SECONDS = keepalive
 
     def test_sending_to_a_deleted_chat_or_girlfriend_is_refused(self):
         client = self.owner()

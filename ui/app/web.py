@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import html
 import json
+import logging
 import re
 import shutil
 import time
@@ -36,6 +37,10 @@ from app.memory import ExportError, MemoryReader, parse_export
 from app.persona import CHOICES, DEFAULT_PERSONA, STYLES, VOICE_IDS, VOICES, clean_persona, example
 from app.store import SociaStore
 from app.voice import SAMPLE, Voice
+
+logger = logging.getLogger("socia")
+# While she takes a picture nothing else is sent; a comment this often keeps tunnels and phones connected.
+KEEPALIVE_SECONDS = 15
 
 STATIC = Path(__file__).parent / "static"
 REFERENCE_NAME = re.compile(r"\d+-[0-9a-f]{8}\.jpg")
@@ -286,6 +291,9 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
             (config.images_dir / file).unlink(missing_ok=True)
         return JSONResponse({"deleted": True})
 
+    # Answers still running after their page went away; kept so they are not garbage-collected.
+    answering: set[asyncio.Task[None]] = set()
+
     async def send(request: Request) -> Response:
         user = await owner(request)
         if isinstance(user, Response):
@@ -311,9 +319,34 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         if conversation.turn.locked():
             return JSONResponse({"error": "She is still answering the last message."}, 409)
 
+        # Her answer runs on its own, so a page that drops off (a phone losing signal mid-picture)
+        # does not cancel it: the picture and her reply are saved and appear when the chat reloads.
+        queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+
+        async def reply() -> None:
+            try:
+                async for event in conversation.send(row, chat_id, text, photo or None, first_name(user),
+                                                     str(form.get("timezone") or "")):
+                    queue.put_nowait(event)
+            except Exception as error:  # noqa: BLE001 - shown in the chat
+                logger.exception("Her answer failed")
+                queue.put_nowait({"type": "error", "text": f"{row['name']} could not answer: {error}"})
+            finally:
+                queue.put_nowait(None)
+
+        task = asyncio.create_task(reply())
+        answering.add(task)
+        task.add_done_callback(answering.discard)
+
         async def events():
-            async for event in conversation.send(row, chat_id, text, photo or None, first_name(user),
-                                                 str(form.get("timezone") or "")):
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), KEEPALIVE_SECONDS)
+                except TimeoutError:
+                    yield ": still here\n\n"
+                    continue
+                if event is None:
+                    return
                 yield f"data: {json.dumps(event)}\n\n"
 
         return StreamingResponse(events(), media_type="text/event-stream",
