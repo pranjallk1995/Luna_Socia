@@ -101,6 +101,14 @@ Open it at http://localhost:18503 and sign in as the owner. With a tunnel, copy
 under `SENTIA_AUTH_COOKIE_DOMAIN`, so the sign-in cookie reaches it. Choose a girlfriend, or create
 one: her profile picture becomes her face in every picture she takes.
 
+## Releases
+
+Each release is on the [Releases page](https://github.com/pranjallk1995/Luna_Socia/releases), with what changed and how to
+upgrade. The `docker-compose.yaml` on `main` names the images of the latest release, so
+`git pull`, then `./Luna_Sentia/luna.sh start`, updates to it. When a release needs a newer
+Luna Sentia, its notes say so: upgrade Sentia first. Its 0.x releases are pre-releases: it is still taking shape, and a release can change how it works. The release of every Luna app is
+listed in [Luna Sentia's Releases](https://github.com/pranjallk1995/Luna_Sentia#releases).
+
 ## Data
 
 The `luna_socia_data` volume holds each girlfriend's profile picture and avatar crop
