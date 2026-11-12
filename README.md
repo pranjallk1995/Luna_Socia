@@ -85,8 +85,16 @@ Clone Socia beside Luna Sentia and start it; no `.env` is needed. Sentia's defau
 password `lunasocia-dev`, which is Socia's default too.
 
 ```bash
-../Luna_Sentia/luna.sh start socia
+git clone https://github.com/pranjallk1995/Luna_Sentia.git
+git clone https://github.com/pranjallk1995/Luna_Socia.git
+./Luna_Sentia/luna.sh start socia
 ```
+
+`start` pulls the release images, starts Sentia and waits until it is healthy, then starts
+Socia. Once both are up, it deletes the images their new ones replaced. The first start also
+downloads the chat and image models, which takes a while. To run your local code instead, use
+`./Luna_Sentia/luna.sh start --build socia`; every option is in
+[Start everything](https://github.com/pranjallk1995/Luna_Sentia#start-everything).
 
 Open it at http://localhost:18503 and sign in as the owner. With a tunnel, copy
 `.env.example` to `.env`, set `UI_PUBLIC_URL`, and route that address to `127.0.0.1:18503`,
