@@ -34,7 +34,7 @@ from app.config import SociaConfig
 from app.images import ComfyUI
 from app import model_usage
 from app.memory import ExportError, MemoryReader, parse_export
-from app.persona import CHOICES, DEFAULT_PERSONA, STYLES, VOICE_IDS, VOICES, clean_persona, example
+from app.persona import CHOICES, DEFAULT_PERSONA, REACTIONS, STYLES, VOICE_IDS, VOICES, clean_persona, example
 from app.store import SociaStore
 from app.voice import SAMPLE, Voice
 
@@ -178,7 +178,8 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         styles = [{"id": key, "label": style["label"], "example": example({**DEFAULT_PERSONA, "style": key})}
                   for key, style in STYLES.items()]
         return JSONResponse({"styles": styles, "lengths": list(CHOICES["length"]), "emoji": list(CHOICES["emoji"]),
-                             "languages": list(CHOICES["language"]), "voices": VOICES, "default_persona": DEFAULT_PERSONA,
+                             "languages": list(CHOICES["language"]), "voices": VOICES, "reactions": REACTIONS,
+                             "default_persona": DEFAULT_PERSONA,
                              "default_voice": config.tts_voice if config.tts_voice in VOICE_IDS else VOICES[0]["id"],
                              "limits": {"name": SociaConfig.NAME_CHARS, "about": SociaConfig.ABOUT_CHARS,
                                         "memory": SociaConfig.MEMORY_CHARS, "references": SociaConfig.MAX_REFERENCES,
@@ -290,6 +291,23 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         for file in files:
             (config.images_dir / file).unlink(missing_ok=True)
         return JSONResponse({"deleted": True})
+
+    async def react(request: Request) -> Response:
+        """The owner's reaction on one of her messages: an emoji to put it on, or null to take it off."""
+        user = await owner(request)
+        if isinstance(user, Response):
+            return user
+        body = await request.json()
+        reaction = body.get("reaction") if isinstance(body, dict) else None
+        if reaction is not None and reaction not in REACTIONS:
+            return JSONResponse({"error": f"React with one of {' '.join(REACTIONS)}."}, 400)
+        message = await asyncio.to_thread(store.message, request.path_params["message_id"])
+        if message is None:
+            return JSONResponse({"error": "no such message"}, 404)
+        if message["role"] != "luna":
+            return JSONResponse({"error": "Only her messages take your reactions."}, 400)
+        row = await asyncio.to_thread(store.set_reaction, message["id"], reaction)
+        return JSONResponse({"message": serialize(row)})
 
     # Answers still running after their page went away; kept so they are not garbage-collected.
     answering: set[asyncio.Task[None]] = set()
@@ -591,6 +609,7 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         Route("/api/chats/{chat_id:int}", chat, methods=["GET", "PATCH", "DELETE"]),
         Route("/api/chats/{chat_id:int}/messages", messages),
         Route("/api/messages/{message_id:int}", delete_message, methods=["DELETE"]),
+        Route("/api/messages/{message_id:int}/reaction", react, methods=["PUT"]),
         Route("/api/send", send, methods=["POST"]),
         Route("/api/images/{image_id:int}", image),
         Route("/api/transcribe", transcribe, methods=["POST"]),

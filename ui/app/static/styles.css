@@ -159,7 +159,9 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-preview-note { margin: 0; padding: 0 0.25rem; }
 
 /* Chat */
-.sc-chat-view { position: relative; height: var(--sc-viewport, 100dvh); }
+/* Pinned to the visible part of the screen, so the on-screen keyboard can neither cover the composer
+   nor scroll the page out from under it (app.js keeps --sc-viewport and --sc-viewport-top current). */
+.sc-chat-view { position: fixed; left: 0; right: 0; top: var(--sc-viewport-top, 0px); height: var(--sc-viewport, 100dvh); overflow: hidden; }
 .sc-app { display: flex; flex-direction: column; height: var(--sc-viewport, 100dvh); min-width: 0; }
 
 .sc-header {
@@ -211,11 +213,26 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-picture-save:hover { background: rgb(0 0 0 / 0.75); color: #fff; }
 .sc-meta-action:focus-visible { outline: 2px solid var(--lv-text); outline-offset: 1px; }
 .sc-lightbox-save { position: fixed; bottom: 1.25rem; left: 50%; transform: translateX(-50%); padding: 0.5rem 1.1rem; border-radius: 999px; background: var(--lv-panel, #222); color: var(--lv-text, #fff); text-decoration: none; font-size: var(--luna-text-small, 0.85rem); }
+/* Reactions: a small badge tucked under the bubble, and the row to pick one from. */
+.sc-reaction {
+  align-self: flex-start; margin: -0.55rem 0 0 0.6rem; padding: 0.05rem 0.35rem; z-index: 1;
+  border: 1px solid var(--lv-border); border-radius: 999px; background: #262626; font-size: 0.85rem; line-height: 1.3;
+}
+.sc-user .sc-reaction { align-self: flex-end; margin: -0.55rem 0.6rem 0 0; }
+.sc-luna .sc-reaction { cursor: pointer; }
+.sc-reactions {
+  display: flex; gap: 0.15rem; margin-top: 0.35rem; padding: 0.25rem; border: 1px solid var(--lv-border);
+  border-radius: 999px; background: #1c1c1c; box-shadow: 0 0.4rem 1.2rem rgb(0 0 0 / 0.45);
+}
+.sc-reactions button { width: 2.2rem; height: 2.2rem; padding: 0; border: 0; border-radius: 50%; background: none; font-size: 1.2rem; cursor: pointer; }
+.sc-reactions button:hover, .sc-reactions button[aria-pressed="true"] { background: var(--lv-control-hover); }
+.sc-react { opacity: 0; transition: opacity 0.15s; }
+.sc-message:hover .sc-react, .sc-message:focus-within .sc-react { opacity: 1; }
 .sc-delete { opacity: 0; transition: opacity 0.15s; }
 .sc-message:hover .sc-delete, .sc-message:focus-within .sc-delete { opacity: 1; }
 .sc-delete:hover { color: var(--sc-bad); }
 /* No hover on touch screens: always show it there. */
-@media (hover: none) { .sc-delete { opacity: 1; } }
+@media (hover: none) { .sc-delete, .sc-react { opacity: 1; } }
 .sc-error { color: var(--sc-bad); font-size: var(--luna-text-small); margin: 0.3rem 0; }
 .sc-typing { display: inline-flex; gap: 0.25rem; padding: 0.75rem 0.9rem; }
 .sc-typing i { width: 0.4rem; height: 0.4rem; border-radius: 50%; background: var(--lv-muted); animation: sc-blink 1.2s infinite; }

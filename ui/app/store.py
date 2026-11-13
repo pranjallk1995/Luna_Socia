@@ -109,6 +109,8 @@ CREATE TABLE IF NOT EXISTS memory_sources (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (companion_id, source, external_id)
 );
+-- An emoji the other one put on this message: the owner on hers, she on the owner's.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS reaction TEXT;
 CREATE INDEX IF NOT EXISTS memory_sources_unread ON memory_sources (companion_id, id) WHERE facts IS NULL;
 """
 
@@ -119,7 +121,7 @@ LEFT JOIN LATERAL (SELECT count(*) AS chats, max(updated_at) AS last_active FROM
 LEFT JOIN LATERAL (SELECT count(*) AS sources, count(facts) AS read FROM memory_sources
                    WHERE companion_id = c.id) mem ON true"""
 
-MESSAGE_COLUMNS = """m.id, m.chat_id, m.role, m.content, m.image_id, m.photo_note, m.created_at,
+MESSAGE_COLUMNS = """m.id, m.chat_id, m.role, m.content, m.image_id, m.photo_note, m.reaction, m.created_at,
                      i.kind AS image_kind, i.prompt AS image_prompt"""
 
 
@@ -340,6 +342,15 @@ class SociaStore:
                 "DELETE FROM images WHERE id = %s AND NOT EXISTS (SELECT 1 FROM messages WHERE image_id = %s) "
                 "RETURNING file", (row["image_id"], row["image_id"])).fetchone()
         return [image["file"]] if image else []
+
+    def set_reaction(self, message_id: int, reaction: str | None) -> dict[str, Any] | None:
+        """Put a reaction on a message, or take it off with None; the message, or None if there is none."""
+        with self.connect() as db:
+            row = db.execute("UPDATE messages SET reaction = %s WHERE id = %s RETURNING id", (reaction, message_id)).fetchone()
+            if row is None:
+                return None
+            return db.execute(f"SELECT {MESSAGE_COLUMNS} FROM messages m LEFT JOIN images i ON i.id = m.image_id "
+                              "WHERE m.id = %s", (message_id,)).fetchone()
 
     def last_photo(self, chat_id: int) -> dict[str, Any] | None:
         """The last photo sent to Luna in this chat, which she can edit or step into."""

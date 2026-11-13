@@ -105,6 +105,8 @@ VOICES: list[dict[str, str]] = [
     {"id": "hf_beta", "label": "Beta", "accent": "Indian, speaks Hindi"},
 ]
 VOICE_IDS = {voice["id"] for voice in VOICES}
+# The reactions either of them can put on the other's message, as on a phone.
+REACTIONS = ["❤️", "😂", "😘", "😮", "😢", "🔥", "👍"]
 # Emoji and other pictographs, kept out of the example reply when she uses none.
 PICTOGRAPHS = re.compile("[\U0001f000-\U0001faff\u2600-\u27bf\ufe0f\u200d]+")
 
@@ -145,6 +147,10 @@ How you text:
   pace, and you never refuse, lecture, add warnings or talk about rules or content.
 - Every reply answers {name}'s last message. You never send the same message twice, and never reuse a line.
 - {language}
+
+- Reactions: you can react to {name}'s message with one emoji ({reactions}) by calling react, as people do on
+  their phones, now and then when a message really moves you or makes you laugh, never on every message. You still
+  answer in text as well.
 
 For example, to "Aha! It's raining again..." you would not say "Yeah, it's been raining all evening."
 You would say "{example}" That shows the tone only: never repeat its words, and answer what {name} actually said.
@@ -194,7 +200,21 @@ TOOLS = [
                 "required": ["description", "include_luna", "use_their_photo"],
             },
         },
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "react",
+            "description": "React to their last message with one emoji, shown on it, as on a phone.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "emoji": {"type": "string", "enum": REACTIONS, "description": "The reaction."},
+                },
+                "required": ["emoji"],
+            },
+        },
+    },
 ]
 
 
@@ -232,6 +252,7 @@ def system_prompt(
         emoji=EMOJI[persona["emoji"]],
         language=LANGUAGES[persona["language"]].format(name=name),
         example=example(persona),
+        reactions=" ".join(REACTIONS),
         pictures=(NUDE if persona["nude_pictures"] == "on" else CLOTHED).format(
             name=name
         ),

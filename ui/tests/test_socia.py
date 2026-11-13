@@ -182,9 +182,15 @@ class MemoryStore:
     def add_message(self, chat_id, role, content, image_id=None, photo_note=None):
         image = self.image(image_id) if image_id else None
         row = {"id": len(self.messages) + 1, "chat_id": chat_id, "role": role, "content": content,
-               "image_id": image_id, "photo_note": photo_note, "created_at": NOW,
+               "image_id": image_id, "photo_note": photo_note, "reaction": None, "created_at": NOW,
                "image_kind": image and image["kind"], "image_prompt": image and image["prompt"]}
         self.messages.append(row)
+        return row
+
+    def set_reaction(self, message_id, reaction):
+        row = next((m for m in self.messages if m["id"] == message_id), None)
+        if row is not None:
+            row["reaction"] = reaction
         return row
 
     def set_photo_note(self, message_id, note):
@@ -423,6 +429,28 @@ class ConversationTests(unittest.TestCase):
         chat = streamed(seen)[0]
         self.assertFalse(chat["think"])
         self.assertEqual(chat["messages"][-1], {"role": "user", "content": "It's raining"})
+
+    def test_she_reacts_to_what_was_sent_and_still_answers(self):
+        react = {"function": {"name": "react", "arguments": {"emoji": "❤"}}}
+        events, seen = self.run_turn([[{"content": "Aww you remembered", "tool_calls": [react]}]], text="I got you flowers")
+        reaction = next(e for e in events if e["type"] == "reaction")
+        sent = next(e for e in events if e["type"] == "user")["message"]
+        # A heart without its variation selector is still the heart.
+        self.assertEqual(reaction, {"type": "reaction", "message_id": sent["id"], "reaction": "❤️"})
+        self.assertEqual(self.store.message(sent["id"])["reaction"], "❤️")
+        self.assertEqual(events[-2]["message"]["content"], "Aww you remembered")
+        self.assertIn("react", [tool["function"]["name"] for tool in streamed(seen)[0]["tools"]])
+
+    def test_a_reaction_alone_gets_words_and_an_unknown_one_is_ignored(self):
+        react = {"function": {"name": "react", "arguments": {"emoji": "😂"}}}
+        events, seen = self.run_turn([[{"content": "", "tool_calls": [react]}], [{"content": "Stoppp 😂"}]],
+                                     text="I fell in the rain")
+        self.assertEqual(events[-2]["message"]["content"], "Stoppp 😂")
+        follow = streamed(seen)[1]["messages"]
+        self.assertEqual(follow[-2]["tool_calls"][0]["function"]["name"], "react")
+        odd = {"function": {"name": "react", "arguments": {"emoji": "🍆"}}}
+        events, _ = self.run_turn([[{"content": "hmm", "tool_calls": [odd]}]], text="guess what")
+        self.assertNotIn("reaction", [e["type"] for e in events])
 
     def test_she_sees_a_photo_and_steps_into_it(self):
         call = {"function": {"name": "create_image", "arguments": {
@@ -973,6 +1001,18 @@ class MessageDeleteTests(unittest.TestCase):
         self.assertEqual(self.client.delete(f"/api/messages/{reply['id']}").status_code, 200)
         self.assertEqual(self.client.delete(f"/api/messages/{reply['id']}").status_code, 404)
 
+    def test_the_owner_reacts_to_her_messages_only(self):
+        mine = self.store.add_message(self.chat["id"], "user", "hey")
+        hers = self.store.add_message(self.chat["id"], "luna", "hiii")
+        url = f"/api/messages/{hers['id']}/reaction"
+        self.assertEqual(self.client.put(url, json={"reaction": "🔥"}).json()["message"]["reaction"], "🔥")
+        self.assertEqual(self.client.get(f"/api/chats/{self.chat['id']}/messages").json()["messages"][1]["reaction"], "🔥")
+        self.assertIsNone(self.client.put(url, json={"reaction": None}).json()["message"]["reaction"])
+        self.assertEqual(self.client.put(url, json={"reaction": "🍆"}).status_code, 400)
+        self.assertEqual(self.client.put(f"/api/messages/{mine['id']}/reaction", json={"reaction": "🔥"}).status_code, 400)
+        self.assertEqual(self.client.put("/api/messages/999/reaction", json={"reaction": "🔥"}).status_code, 404)
+        self.assertIn("😂", self.client.get("/api/options").json()["reactions"])
+
     def test_nothing_is_deleted_while_she_is_answering(self):
         sent = self.store.add_message(self.chat["id"], "user", "hey")
         app = self.client.app
@@ -994,6 +1034,17 @@ if __name__ == "__main__":
 
 
 class LoopAndLanguageTests(unittest.TestCase):
+    def test_she_reads_the_owners_reactions_before_their_next_message(self):
+        rows = [{"role": "user", "content": "hi"}, {"role": "luna", "content": "Missed you all day", "reaction": "❤️"},
+                {"role": "user", "content": "me too"}]
+        self.assertEqual(model_messages(rows)[-1]["content"],
+                         '[Reacted ❤️ to your message: "Missed you all day"]\nme too')
+
+    def test_she_knows_how_to_react(self):
+        prompt = system_prompt({"name": "Luna", "persona": dict(DEFAULT_PERSONA)}, "Pranjall", NOW)
+        self.assertIn("calling react", prompt)
+        self.assertIn("😂", prompt)
+
     def test_a_reply_she_already_sent_is_not_read_again(self):
         refusal = "Nope! 😘 Let's keep things fun"
         rows = [{"role": "user", "content": "a"}, {"role": "luna", "content": refusal},

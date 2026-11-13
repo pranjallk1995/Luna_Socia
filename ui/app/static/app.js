@@ -518,16 +518,24 @@ function toBottom() {
   thread.scrollTop = thread.scrollHeight;
 }
 
-// The on-screen keyboard: browsers that ignore the viewport's interactive-widget hint (Safari)
-// only shrink the visual viewport, so the chat is sized to it to keep the composer above the keys.
+// The on-screen keyboard: browsers that ignore the viewport's interactive-widget hint (Safari, some
+// Android browsers) only shrink the visual viewport and scroll the page to show the focused box. The
+// chat is fixed to the visual viewport, its height and its offset, so the composer sits right on the keys.
 if (window.visualViewport) {
+  const viewport = window.visualViewport;
+  const root = document.documentElement.style;
   const fit = () => {
     const stick = nearBottom();
-    document.documentElement.style.setProperty("--sc-viewport", `${window.visualViewport.height}px`);
-    if (document.activeElement === text) window.scrollTo(0, 0);
+    root.setProperty("--sc-viewport", `${viewport.height}px`);
+    root.setProperty("--sc-viewport-top", `${viewport.offsetTop}px`);
     if (stick) toBottom();
   };
-  window.visualViewport.addEventListener("resize", fit);
+  viewport.addEventListener("resize", fit);
+  viewport.addEventListener("scroll", fit);
+  // The keyboard opens a moment after focus, and some browsers report its size late.
+  for (const event of ["focus", "blur"]) {
+    text.addEventListener(event, () => { fit(); setTimeout(fit, 300); });
+  }
   fit();
 }
 
@@ -565,6 +573,7 @@ function lightbox(url) {
 function messageElement(message) {
   const element = document.createElement("div");
   element.className = `sc-message sc-${message.role}`;
+  if (message.id) element.dataset.id = message.id;
   if (message.image_url) {
     // The picture with its download button in the corner; saved with the date in its name.
     const figure = document.createElement("div");
@@ -590,14 +599,92 @@ function messageElement(message) {
     }
     element.append(row);
   }
+  if (message.role === "luna" && message.id) {
+    // A double tap on what she said or sent puts a heart on it, or takes it off, as on a phone.
+    element.addEventListener("dblclick", (event) => {
+      if (event.target.closest(".sc-meta, .sc-meta-action, .sc-reactions")) return;
+      react(message.id, element.dataset.reaction === REACTIONS()[0] ? null : REACTIONS()[0]);
+    });
+  }
   element.append(meta(message));
+  showReaction(element, message.reaction);
   return element;
+}
+
+// Reactions: the emoji either of them can put on the other's message.
+function REACTIONS() {
+  return state.options?.reactions ?? ["❤️", "😂", "😘", "😮", "😢", "🔥", "👍"];
+}
+
+function showReaction(element, reaction) {
+  if (!element) return;
+  element.querySelector(".sc-reaction")?.remove();
+  if (reaction) element.dataset.reaction = reaction;
+  else delete element.dataset.reaction;
+  if (!reaction) return;
+  const badge = document.createElement("span");
+  badge.className = "sc-reaction";
+  badge.textContent = reaction;
+  const mine = element.classList.contains("sc-luna");
+  badge.title = state.her ? `${state.her.name}'s reaction` : "Her reaction";
+  if (mine) {
+    badge.setAttribute("role", "button");
+    badge.tabIndex = 0;
+    badge.title = "Your reaction: tap to take it off";
+    badge.addEventListener("click", () => react(Number(element.dataset.id), null));
+  }
+  element.querySelector(".sc-meta").before(badge);
+}
+
+async function react(id, reaction) {
+  const element = list.querySelector(`.sc-message[data-id="${id}"]`);
+  const before = element?.dataset.reaction ?? null;
+  showReaction(element, reaction);
+  closeReactions();
+  const reply = await fetch(`/api/messages/${id}/reaction`, {
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reaction }),
+  }).catch(() => null);
+  if (!reply?.ok) {
+    showReaction(element, before);
+    const { error } = (await reply?.json().catch(() => null)) || {};
+    alert(error || "That reaction did not stick.");
+  }
+}
+
+// The row of reactions that opens above one of her messages.
+function openReactions(id, anchor) {
+  const open = document.querySelector(".sc-reactions");
+  closeReactions();
+  if (open?.dataset.for === String(id)) return;
+  const element = list.querySelector(`.sc-message[data-id="${id}"]`);
+  const current = element?.dataset.reaction ?? null;
+  const picker = document.createElement("div");
+  picker.className = "sc-reactions";
+  picker.dataset.for = id;
+  picker.setAttribute("role", "menu");
+  for (const emoji of REACTIONS()) {
+    const choice = document.createElement("button");
+    choice.type = "button";
+    choice.textContent = emoji;
+    choice.setAttribute("role", "menuitem");
+    choice.setAttribute("aria-label", emoji === current ? `Take off ${emoji}` : `React ${emoji}`);
+    if (emoji === current) choice.setAttribute("aria-pressed", "true");
+    choice.addEventListener("click", () => react(id, emoji === current ? null : emoji));
+    picker.append(choice);
+  }
+  anchor.closest(".sc-meta").before(picker);
+  picker.querySelector("button")?.focus();
+}
+
+function closeReactions() {
+  document.querySelector(".sc-reactions")?.remove();
 }
 
 // A message's small icon buttons (voice, download, delete), in the page's own line style.
 const META_ICONS = {
   play: '<path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/>',
   download: '<path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/>',
+  react: '<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01"/><path d="M15 9.5h.01"/>',
   delete: '<path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
 };
 
@@ -617,6 +704,11 @@ function meta(message) {
   line.className = "sc-meta";
   const time = new Date(message.created_at);
   line.append(time.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }));
+  if (message.id && message.role === "luna") {
+    const add = metaAction("button", "react", "React to this message");
+    add.addEventListener("click", (event) => openReactions(message.id, event.currentTarget));
+    line.append(add);
+  }
   if (message.id) {
     const remove = metaAction("button", "delete", "Delete this message");
     remove.addEventListener("click", (event) => deleteMessage(message.id, event.currentTarget.closest(".sc-message")));
@@ -841,6 +933,10 @@ function handle(event, reply) {
         setPresence("typing…", true);
       }
       reply.bubble.textContent += event.text;
+      break;
+    case "reaction":
+      // She reacted to what you just sent.
+      showReaction(list.querySelector(`.sc-message[data-id="${event.message_id}"]`), event.reaction);
       break;
     case "image_started":
       reply.developing = document.createElement("div");
@@ -1223,6 +1319,11 @@ function wire() {
   $("sidebar-backdrop").addEventListener("click", closeSidebar);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && $("sidebar").classList.contains("sc-open")) closeSidebar();
+    if (event.key === "Escape") closeReactions();
+  });
+  // The reactions row closes on a tap anywhere else.
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".sc-reactions, .sc-react")) closeReactions();
   });
   $("to-home").addEventListener("click", () => go(""));
   $("new-chat").addEventListener("click", newChat);

@@ -18,7 +18,7 @@ from PIL import Image, ImageOps
 from app.config import SociaConfig
 from app.images import ComfyUI
 from app.ollama import LOOKS_PROMPT, Ollama
-from app.persona import TOOLS, clean_persona, image_prompt, system_prompt
+from app.persona import REACTIONS, TOOLS, clean_persona, image_prompt, system_prompt
 from app.store import SociaStore
 
 logger = logging.getLogger("socia")
@@ -40,6 +40,7 @@ def serialize(row: dict[str, Any]) -> dict[str, Any]:
         "content": row["content"],
         "image_url": f"/api/images/{row['image_id']}" if row.get("image_id") else None,
         "image_kind": row.get("image_kind"),
+        "reaction": row.get("reaction"),
         "created_at": row["created_at"].isoformat(),
     }
 
@@ -120,17 +121,23 @@ def model_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The conversation as the chat model reads it: photos and pictures become notes in brackets.
 
     A reply she already sent once is left out the second time: a model that sees itself
-    repeat a line (a refusal, say) tends to send it again and again.
+    repeat a line (a refusal, say) tends to send it again and again. The owner's reactions to
+    her messages come before their next message, as a note in brackets.
     """
-    messages, said = [], set()
+    messages, said, reacted = [], set(), []
     for row in rows:
         content = row["content"]
         if row["role"] == "user":
             if row.get("photo_note"):
                 content = f"{content}\n[Photo: {row['photo_note']}]".strip()
+            content = "\n".join([*reacted, content]).strip()
+            reacted = []
             messages.append({"role": "user", "content": content})
         else:
             content = without_written_pictures(content)
+            if row.get("reaction"):
+                said_what = " ".join(content.split())[:80] or "your picture"
+                reacted.append(f'[Reacted {row["reaction"]} to your message: "{said_what}"]')
             picture = row.get("image_prompt") if row.get("image_kind") == "generated" else None
             key = " ".join(f"{content} {picture or ''}".split()).casefold()
             if key in said:
@@ -303,6 +310,9 @@ class Conversation:
             return
 
         image_id = None
+        reaction = await self.react(calls, rows)
+        if reaction:
+            yield {"type": "reaction", **reaction}
         call = next((c for c in calls if (c.get("function") or {}).get("name") == "create_image"), None)
         if call is None:
             call = written_picture(text)
@@ -321,20 +331,45 @@ class Conversation:
             except Exception as error:  # noqa: BLE001 - shown in the chat
                 logger.exception("Image failed")
                 yield {"type": "error", "text": f"The picture did not come out: {error}"}
-            if not text.strip():
-                # She only sent the picture; let her say something with it.
-                follow = [*messages, {"role": "assistant", "content": "", "tool_calls": [call]},
-                          {"role": "tool", "content": "The picture was sent." if image_id else "The camera failed."}]
-                try:
-                    async for piece in self.ollama.chat(follow):
-                        if "text" in piece:
-                            text += piece["text"]
-                            yield {"type": "text", "text": piece["text"]}
-                except Exception:  # noqa: BLE001 - the picture alone is enough
-                    logger.exception("Caption failed")
+        if not text.strip() and (call or reaction):
+            # She only sent a picture or a reaction; let her say something with it.
+            used, results = [], []
+            if reaction:
+                used.append({"function": {"name": "react", "arguments": {"emoji": reaction["reaction"]}}})
+                results.append({"role": "tool", "content": "Your reaction is on their message."})
+            if call:
+                used.append(call)
+                results.append({"role": "tool", "content": "The picture was sent." if image_id else "The camera failed."})
+            follow = [*messages, {"role": "assistant", "content": "", "tool_calls": used}, *results]
+            try:
+                async for piece in self.ollama.chat(follow):
+                    if "text" in piece:
+                        text += piece["text"]
+                        yield {"type": "text", "text": piece["text"]}
+            except Exception:  # noqa: BLE001 - the picture or reaction alone is enough
+                logger.exception("Caption failed")
 
         saved = await asyncio.to_thread(self.store.add_message, chat_id, "luna", text.strip(), image_id)
         yield {"type": "done", "message": serialize(saved)}
+
+    async def react(self, calls: list[dict[str, Any]], rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Her reaction on the owner's last message, if she called react with one she has; else None."""
+        call = next((c for c in calls if (c.get("function") or {}).get("name") == "react"), None)
+        if call is None or not rows or rows[-1]["role"] != "user":
+            return None
+        arguments = call["function"].get("arguments") or {}
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments or "{}")
+            except json.JSONDecodeError:
+                return None
+        emoji = str(arguments.get("emoji") or "").strip()
+        # A model may drop the emoji's variation selector (❤ for ❤️); either is the same reaction.
+        emoji = next((r for r in REACTIONS if emoji and emoji.replace("\ufe0f", "") == r.replace("\ufe0f", "")), None)
+        if emoji is None:
+            return None
+        await asyncio.to_thread(self.store.set_reaction, rows[-1]["id"], emoji)
+        return {"message_id": rows[-1]["id"], "reaction": emoji}
 
     async def promised_picture(self, her: str, name: str, rows: list[dict[str, Any]],
                                text: str) -> dict[str, Any] | None:
