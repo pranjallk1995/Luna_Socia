@@ -539,6 +539,19 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(self.store.chat(events[0]["chat"]["id"])["notes"], "Secret: the moon")
         self.assertEqual(events[-2]["message"]["content"], "Ready!  Ask me 😘")
 
+    def test_a_vision_model_of_her_own_reads_photos_at_its_own_context(self):
+        from dataclasses import replace
+        asked = []
+
+        def ollama(request: httpx.Request) -> httpx.Response:
+            asked.append(json.loads(request.content))
+            return httpx.Response(200, json={"message": {"content": "A cat."}})
+
+        own = replace(self.config, vision_model="huihui_ai/qwen3-vl-abliterated:4b-instruct", vision_context_tokens=4096)
+        self.assertEqual(asyncio.run(Ollama(own, httpx.MockTransport(ollama)).describe_photo(png())), "A cat.")
+        self.assertEqual((asked[0]["model"], asked[0]["options"]["num_ctx"]),
+                         ("huihui_ai/qwen3-vl-abliterated:4b-instruct", 4096))
+
     def test_she_sees_a_photo_and_steps_into_it(self):
         call = {"function": {"name": "create_image", "arguments": {
             "description": "standing beside them, smiling", "include_luna": True, "use_their_photo": True}}}

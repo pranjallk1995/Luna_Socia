@@ -612,8 +612,8 @@ function messageElement(message) {
   return element;
 }
 
-// Each Luna app's mark, for her replies and the settings list.
-const APP_MARKS = { fiora: "💰", lexia: "📄", lumia: "💡", vibia: "🎵", visia: "🖼️", vita: "🥗", sentia: "🖥️" };
+// Each Luna app's logo (copied from its page into static/apps), for her replies and the settings list.
+const appLogo = (key, className) => element("img", { className, src: `/static/apps/${key}.png`, alt: "", loading: "lazy" });
 const APP_NAMES = { fiora: "Luna Fiora", lexia: "Luna Lexia", lumia: "Luna Lumia", vibia: "Luna Vibia",
                     visia: "Luna Visia", vita: "Luna Vita", sentia: "Luna Sentia" };
 
@@ -622,9 +622,9 @@ function usedApps(apps) {
   const list = document.createElement("div");
   list.className = "sc-used-apps";
   for (const use of apps) {
-    const item = document.createElement("span");
-    item.className = "sc-used-app";
-    item.textContent = `${APP_MARKS[use.app] || "📱"} ${APP_NAMES[use.app] || use.app}${use.tool ? ` · ${use.tool}` : ""}`;
+    const item = element("span", { className: "sc-used-app" },
+      appLogo(use.app, "sc-used-app-logo"),
+      element("span", { textContent: `${APP_NAMES[use.app] || use.app}${use.tool ? ` · ${use.tool}` : ""}` }));
     list.append(item);
   }
   return list;
@@ -938,6 +938,8 @@ function handle(event, reply) {
       showChat(event.chat);
       break;
     case "user":
+      // The server has your message: it takes the place of the one still uploading.
+      reply.pending?.remove();
       append(event.message);
       list.append(reply.element);
       break;
@@ -997,33 +999,39 @@ async function send(words) {
   form.append("companion_id", state.her.id);
   if (state.chat) form.append("chat_id", state.chat.id);
   form.append("timezone", Intl.DateTimeFormat().resolvedOptions().timeZone || "");
-  if (state.photo) form.append("photo", state.photo);
+  const photo = state.photo;
+  if (photo) form.append("photo", photo);
   text.value = "";
   resize();
   clearPhoto();
+  closeEmoji();
   const reply = replyElement();
   reply.element.remove();
+  // A photo shows straight away, with how much of it has gone up.
+  reply.pending = photo ? pendingPhoto(photo, message) : null;
+  let buffer = "";
+  const read = (piece) => {
+    buffer += piece;
+    let end;
+    while ((end = buffer.indexOf("\n\n")) >= 0) {
+      const chunk = buffer.slice(0, end);
+      buffer = buffer.slice(end + 2);
+      if (chunk.startsWith("data: ")) handle(JSON.parse(chunk.slice(6)), reply);
+    }
+  };
   try {
-    const response = await fetch("/api/send", { method: "POST", body: form });
-    if (!response.ok) {
-      const { error } = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+    const answer = await postStream("/api/send", form, (sent) => reply.pending?.progress(sent), read);
+    if (answer.status !== 200) {
+      let error = `HTTP ${answer.status}`;
+      try { error = JSON.parse(answer.responseText).error || error; } catch {}
       throw new Error(error);
     }
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let end;
-      while ((end = buffer.indexOf("\n\n")) >= 0) {
-        const chunk = buffer.slice(0, end);
-        buffer = buffer.slice(end + 2);
-        if (chunk.startsWith("data: ")) handle(JSON.parse(chunk.slice(6)), reply);
-      }
-    }
   } catch (error) {
+    if (reply.pending?.isConnected) {
+      // It never arrived: the photo goes back into the composer to send again.
+      reply.pending.remove();
+      restorePhoto(photo, message);
+    }
     if (!reply.element.isConnected) list.append(reply.element);
     handle({ type: "error", text: error.message }, reply);
     reply.typing.remove();
@@ -1034,6 +1042,103 @@ async function send(words) {
     text.focus();
     loadChats();
   }
+}
+
+// POST a form and read the streamed answer as it comes. XMLHttpRequest, not fetch, because only it
+// reports how much of an upload has gone; it resolves with the request once the answer is complete.
+function postStream(url, form, onUpload, onText) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    let seen = 0;
+    const more = () => {
+      if (request.status !== 200) return;
+      const all = request.responseText;
+      if (all.length > seen) { onText(all.slice(seen)); seen = all.length; }
+    };
+    request.open("POST", url);
+    request.upload.addEventListener("progress", (event) => { if (event.lengthComputable) onUpload(event.loaded / event.total); });
+    request.upload.addEventListener("load", () => onUpload(1));
+    request.addEventListener("progress", more);
+    request.addEventListener("load", () => { more(); resolve(request); });
+    request.addEventListener("error", () => reject(new Error("The connection dropped; your message was not sent.")));
+    request.addEventListener("abort", () => reject(new Error("Sending was stopped.")));
+    request.send(form);
+  });
+}
+
+// Your photo in the chat while it uploads: a bar and how far it has got, then "saving" until the server has it.
+function pendingPhoto(file, words) {
+  const url = URL.createObjectURL(file);
+  const bar = element("i");
+  const label = element("span", { textContent: "Uploading…" });
+  const upload = element("div", { className: "sc-upload" }, element("div", { className: "sc-upload-bar" }, bar), label);
+  upload.setAttribute("role", "progressbar");
+  upload.setAttribute("aria-valuemin", "0");
+  upload.setAttribute("aria-valuemax", "100");
+  const figure = element("div", { className: "sc-figure" },
+    element("img", { className: "sc-picture", src: url, alt: "Your photo, sending" }), upload);
+  const node = element("div", { className: "sc-message sc-user sc-pending" }, figure,
+    words ? element("div", { className: "sc-bubble-row" }, element("div", { className: "sc-bubble", textContent: words })) : null);
+  list.append(node);
+  $("empty").hidden = true;
+  toBottom();
+  node.progress = (fraction) => {
+    const percent = Math.round(fraction * 100);
+    bar.style.width = `${percent}%`;
+    upload.setAttribute("aria-valuenow", String(percent));
+    label.textContent = percent < 100 ? `Uploading ${percent}% of ${size(file.size)}` : "Saving…";
+  };
+  const remove = node.remove.bind(node);
+  node.remove = () => { URL.revokeObjectURL(url); remove(); };
+  return node;
+}
+
+function size(bytes) {
+  return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function restorePhoto(file, words) {
+  state.photo = file;
+  $("attachment-preview").src = URL.createObjectURL(file);
+  $("attachment").hidden = false;
+  if (words && !text.value) { text.value = words; resize(); }
+}
+
+// Emoji, on a desktop: a phone's keyboard has its own.
+const EMOJI = ["😀", "😂", "🤣", "😊", "😍", "🥰", "😘", "😉", "😜", "😎", "🤗", "🤔", "🙈", "😏", "😌", "😴",
+  "🥺", "😢", "😭", "😤", "😡", "😮", "😳", "🤭", "❤️", "💕", "💖", "💔", "🔥", "✨", "🌹", "🌙",
+  "👍", "👎", "👏", "🙏", "💪", "👋", "🤞", "👀", "🎉", "🎂", "☕", "🍕", "🍫", "🍷", "🎵", "🌧️",
+  "☀️", "🌸", "🐱", "🐶", "💋", "🫶", "😇", "🤤", "😋", "🥲", "🙃", "💤", "😅", "🤩", "😚", "💯"];
+
+function closeEmoji() {
+  $("emoji-panel").hidden = true;
+  $("emoji-toggle").setAttribute("aria-expanded", "false");
+}
+
+function wireEmoji() {
+  const panel = $("emoji-panel");
+  panel.replaceChildren(...EMOJI.map((emoji) => {
+    const button = element("button", { type: "button", textContent: emoji, title: emoji });
+    button.addEventListener("click", () => {
+      // At the cursor, replacing a selection, and the cursor after it.
+      const start = text.selectionStart ?? text.value.length;
+      const end = text.selectionEnd ?? start;
+      text.setRangeText(emoji, start, end, "end");
+      resize();
+      text.focus();
+    });
+    return button;
+  }));
+  $("emoji-toggle").addEventListener("click", () => {
+    const opening = panel.hidden;
+    panel.hidden = !opening;
+    $("emoji-toggle").setAttribute("aria-expanded", String(opening));
+    if (opening) panel.querySelector("button")?.focus({ preventScroll: true });
+  });
+  document.addEventListener("click", (event) => {
+    if (!panel.hidden && !event.target.closest("#emoji-panel, #emoji-toggle")) closeEmoji();
+  });
+  panel.addEventListener("keydown", (event) => { if (event.key === "Escape") { closeEmoji(); text.focus(); } });
 }
 
 // Voice: her replies aloud, and voice messages through the server's Whisper.
@@ -1283,6 +1388,7 @@ function wire() {
     text.focus();
   });
   $("attachment-remove").addEventListener("click", clearPhoto);
+  wireEmoji();
   $("mic").addEventListener("click", toggleRecording);
   $("older").addEventListener("click", () => loadMessages(state.oldest));
 
@@ -1374,12 +1480,14 @@ async function showApps() {
     ? "She can use the running ones for you, as you, when you ask."
     : "Not connected: connect them, then allow Luna Socia on Luna Sentia's sign-in page, once.";
   list.replaceChildren(...status.apps.map((app) => {
-    const item = element("li", { className: `sc-app${status.connected && app.running ? " sc-app-on" : ""}` });
+    const item = element("li", { className: `sc-luna-app${status.connected && app.running ? " sc-luna-app-on" : ""}` });
     const label = !status.connected ? "not connected" : app.running ? "running" : "not running";
     item.append(
-      element("span", { className: "sc-app-mark", textContent: APP_MARKS[app.key] || "📱" }),
-      element("span", { className: "sc-app-text", textContent: `${app.name} — ${app.purpose}` }),
-      element("span", { className: "sc-app-state", textContent: label }));
+      appLogo(app.key, "sc-luna-app-logo"),
+      element("span", { className: "sc-luna-app-text" },
+        element("strong", { textContent: app.name }),
+        element("small", { textContent: app.purpose })),
+      element("span", { className: "sc-luna-app-state", textContent: label }));
     return item;
   }));
   $("apps-menu-toggle").textContent = status.connected ? "Disconnect Luna apps" : "Connect Luna apps";

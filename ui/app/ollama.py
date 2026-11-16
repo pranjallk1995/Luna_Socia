@@ -13,15 +13,11 @@ from app.config import SociaConfig
 
 # Socia names itself to the monitor, which shows each call under its app.
 APP_HEADER = {"X-Luna-App": "socia"}
-PHOTO_PROMPT = ("Describe this photo for someone who cannot see it, in 2-4 sentences: who and what is in it, "
-                "the place, the mood, and any text. Plain description, no preamble.")
+PHOTO_PROMPT = ("Describe this photo for someone who cannot see it, in 2-4 sentences: who or what is in it (say "
+                "plainly when it is an animal, and what kind), the place, the mood, and any text. A name in a corner "
+                "is the photographer's watermark: call it that. Plain description, no preamble.")
 LOOKS_PROMPT = ("Describe only the woman's lasting appearance in one or two sentences, for recognizing her: face, "
                 "hair, skin, eyes, build, age range. Not her clothes, pose or the scene. No preamble.")
-
-# The vision model is shared with Visia, Lexia, Vibia and Fiora, which all ask for it at this
-# context. Ollama reloads a model whose requested context changes, so matching it lets every
-# app share the one copy instead of each photo reloading it.
-VISION_CONTEXT_TOKENS = 16_384
 
 # Above 1 makes tokens she used in the last 256 less likely; 1.15 breaks loops without stilted wording.
 REPEAT_PENALTY = 1.15
@@ -83,7 +79,8 @@ class Ollama:
             "model": self.config.vision_model,
             "messages": [{"role": "user", "content": prompt, "images": [base64.b64encode(image).decode()]}],
             "stream": False,
-            "options": {"num_ctx": VISION_CONTEXT_TOKENS, "temperature": 0.2},
+            # Ollama reloads a model whose requested context changes: see SociaConfig.vision_context_tokens.
+            "options": {"num_ctx": self.config.vision_context_tokens, "temperature": 0.2},
         })
         reply.raise_for_status()
         return (reply.json().get("message") or {}).get("content", "").strip()

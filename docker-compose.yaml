@@ -17,6 +17,8 @@ services:
       LUNASOCIA_VISION_MODEL: ${LUNASOCIA_VISION_MODEL:-qwen3-vl:8b-instruct}
       # Must equal SENTIA_RESIDENT_CONTEXT, or Ollama reloads her model for every reply.
       LUNASOCIA_CONTEXT_TOKENS: ${LUNASOCIA_CONTEXT_TOKENS:-8192}
+      # 16k shares qwen3-vl:8b-instruct with the other apps; a vision model of her own: 4096.
+      LUNASOCIA_VISION_CONTEXT_TOKENS: ${LUNASOCIA_VISION_CONTEXT_TOKENS:-16384}
       LUNASOCIA_STT_MODEL: ${LUNASOCIA_STT_MODEL:-large-v3-turbo}
       LUNASOCIA_STT_LANGUAGES: ${LUNASOCIA_STT_LANGUAGES:-en,hi}
       LUNASOCIA_TTS_VOICE: ${LUNASOCIA_TTS_VOICE:-af_heart}

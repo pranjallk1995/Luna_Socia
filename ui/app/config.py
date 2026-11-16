@@ -57,6 +57,10 @@ class SociaConfig:
     # 8k holds the last 40 short messages and leaves room on the GPU; it must equal
     # SENTIA_RESIDENT_CONTEXT, or Ollama reloads the model for every reply.
     context_tokens: int = 8192
+    # The vision model's context. 16k matches the apps that share qwen3-vl:8b-instruct, so
+    # they share one copy; a vision model of Socia's own needs only room for a photo (4k),
+    # and must then equal its context in SENTIA_RESIDENT_CONTEXT.
+    vision_context_tokens: int = 16384
     temperature: float = 0.8
     # Qwen-Image 2.1's pixel budget: about resolution x resolution, keeping the aspect ratio.
     image_resolution: int = 1024
@@ -94,6 +98,7 @@ class SociaConfig:
             chat_model=setting("LUNASOCIA_CHAT_MODEL", cls.chat_model),
             vision_model=setting("LUNASOCIA_VISION_MODEL", cls.vision_model),
             context_tokens=int(setting("LUNASOCIA_CONTEXT_TOKENS", str(cls.context_tokens))),
+            vision_context_tokens=int(setting("LUNASOCIA_VISION_CONTEXT_TOKENS", str(cls.vision_context_tokens))),
             temperature=float(setting("LUNASOCIA_TEMPERATURE", str(cls.temperature))),
             image_resolution=int(setting("LUNASOCIA_IMAGE_RESOLUTION", str(cls.image_resolution))),
             image_model=setting("LUNASOCIA_IMAGE_MODEL", cls.image_model),

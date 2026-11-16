@@ -370,14 +370,48 @@ button, textarea, input, select { font: inherit; color: inherit; }
 }
 
 /* Luna apps: the settings menu's list, and what she did under her reply. */
-.sc-apps { display: grid; gap: 0.3rem; margin: 0; padding: 0; list-style: none; }
-.sc-app { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.5rem; border: 1px solid var(--lv-border);
-  border-radius: 8px; color: var(--lv-muted); font-size: var(--luna-text-small); }
-.sc-app-mark { flex: none; }
-.sc-app-text { flex: 1; min-width: 0; }
-.sc-app-state { flex: none; font-size: 0.7rem; }
-.sc-app-on { color: var(--lv-text); }
-.sc-app-on .sc-app-state { color: var(--lv-accent); }
+.sc-luna-apps { display: grid; gap: 0.35rem; margin: 0; padding: 0; list-style: none; }
+.sc-luna-app {
+  display: flex; align-items: center; gap: 0.6rem; padding: 0.45rem 0.6rem; text-align: left;
+  border: 1px solid var(--lv-border); border-radius: 0.6rem; color: var(--lv-muted);
+}
+.sc-luna-app-logo { flex: none; width: 2rem; height: 2rem; object-fit: contain; }
+.sc-luna-app:not(.sc-luna-app-on) .sc-luna-app-logo { opacity: 0.45; }
+.sc-luna-app-text { display: grid; flex: 1; min-width: 0; }
+.sc-luna-app-text strong { font-size: 0.85rem; font-weight: 600; }
+.sc-luna-app-text small { overflow: hidden; font-size: var(--luna-text-small); text-overflow: ellipsis; white-space: nowrap; }
+.sc-luna-app-state {
+  flex: none; padding: 0.1rem 0.5rem; border: 1px solid var(--lv-border); border-radius: 999px;
+  font-size: 0.68rem; white-space: nowrap;
+}
+.sc-luna-app-on { color: var(--lv-text); }
+.sc-luna-app-on .sc-luna-app-text small { color: var(--lv-muted); }
+.sc-luna-app-on .sc-luna-app-state { border-color: var(--lv-accent); color: var(--lv-accent); }
 .sc-used-apps { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.25rem; }
-.sc-used-app { padding: 0.1rem 0.5rem; border: 1px solid var(--lv-border); border-radius: 999px;
-  background: var(--lv-control); color: var(--lv-muted); font-size: 0.7rem; }
+.sc-used-app { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.1rem 0.5rem 0.1rem 0.25rem;
+  border: 1px solid var(--lv-border); border-radius: 999px; background: var(--lv-control); color: var(--lv-muted); font-size: 0.7rem; }
+.sc-used-app-logo { width: 1rem; height: 1rem; object-fit: contain; }
+
+/* Your photo while it uploads: a bar across its foot, then "saving" until the server has it. */
+.sc-pending .sc-picture { opacity: 0.6; }
+.sc-upload {
+  position: absolute; left: 0.5rem; right: 0.5rem; bottom: 0.75rem; display: grid; gap: 0.3rem;
+  padding: 0.45rem 0.6rem; border-radius: 0.6rem; background: rgb(0 0 0 / 0.65); color: #fff; font-size: var(--luna-text-small);
+}
+.sc-upload-bar { height: 0.3rem; overflow: hidden; border-radius: 999px; background: rgb(255 255 255 / 0.2); }
+.sc-upload-bar i { display: block; width: 0; height: 100%; border-radius: 999px; background: #fff; transition: width 0.2s; }
+
+/* Emoji, on a desktop only: a phone's keyboard has its own. */
+.sc-emoji-toggle { display: none; }
+.sc-composer-inner { position: relative; }
+.sc-emoji-panel {
+  position: absolute; bottom: calc(100% + 0.5rem); left: 0; z-index: 3;
+  display: grid; grid-template-columns: repeat(8, 2.4rem); gap: 0.15rem; padding: 0.5rem;
+  border: 1px solid var(--lv-border); border-radius: 1rem; background: #1c1c1c; box-shadow: 0 0.6rem 1.6rem rgb(0 0 0 / 0.5);
+}
+.sc-emoji-panel button {
+  width: 2.4rem; height: 2.4rem; padding: 0; border: 0; border-radius: 0.6rem; background: none;
+  font-size: 1.35rem; line-height: 1; cursor: pointer;
+}
+.sc-emoji-panel button:hover, .sc-emoji-panel button:focus-visible { background: var(--lv-control-hover); }
+@media (hover: hover) and (pointer: fine) { .sc-emoji-toggle { display: inline-grid; } }
