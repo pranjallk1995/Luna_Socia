@@ -1,0 +1,11 @@
+# Notebooks are kept as .py files (jupytext). The .ipynb copies hold the outputs: her pictures and your
+# chats. Like everything else made here, they never go into git.
+*.ipynb
+.ipynb_checkpoints/
+results/
+# Socia's settings and the Jupyter token, written by start.sh.
+.socia.env
+.jupyter-token
+__pycache__/
+# What to improve next, with evaluation results and what happened in your chats: on this machine only.
+ACTION_ITEMS.md

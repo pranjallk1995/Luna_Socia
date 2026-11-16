@@ -1,0 +1,2 @@
+# Each notebook is a .py file (in git) paired with an .ipynb (outputs, never in git).
+formats = "ipynb,py:percent"
