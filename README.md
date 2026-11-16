@@ -18,11 +18,11 @@ for the owner only. Its models run in Luna Sentia, which every Luna app shares.
 
 | Part | Model | Where it runs | Before changing it |
 | --- | --- | --- | --- |
-| Chat | `LUNASOCIA_CHAT_MODEL` (default `huihui_ai/qwen3-abliterated:14b`, an uncensored Qwen3 14B, about 9.4 GB with 8k context) | Sentia's Ollama, through its monitor, on the GPU | Compare it with [`model_evaluations/`](model_evaluations/README.md) and check it fits with Sentia's `model_checks/check_model.py --context 8192` |
-| Photos sent to Luna | `LUNASOCIA_VISION_MODEL` (default `qwen3-vl:8b-instruct`) describes them for her, at 16k context like Visia, Lexia, Vibia and Fiora, so they share one loaded copy (`LUNASOCIA_VISION_CONTEXT_TOKENS`; a small vision model of her own needs only 4096, and can stay on the GPU beside her chat model when both are in Sentia's `SENTIA_RESIDENT_MODEL`) | Sentia's Ollama, on the GPU | Sentia's `model_checks/check_model.py`, then a few photos by hand |
+| Chat | `LUNASOCIA_CHAT_MODEL` (default `huihui_ai/qwen3-abliterated:8b`, an uncensored Qwen3 8B, about 5.2 GB with 8k context), resident on the GPU | Sentia's Ollama, through its monitor, on the GPU | Compare it with [`model_evaluations/`](model_evaluations/README.md) and check it fits with Sentia's `model_checks/check_model.py --context 8192` |
+| Photos sent to Luna | `LUNASOCIA_VISION_MODEL` (default `huihui_ai/qwen3-vl-abliterated:8b-instruct`, an uncensored Qwen3-VL 8B, about 5.7 GB with 8k context) sees them and answers as her, then describes each photo for her later replies (`LUNASOCIA_VISION_CONTEXT_TOKENS`, default 8192). It takes the chat model's place on the GPU for that reply | Sentia's Ollama, on the GPU | Socia's cat game (`model_evaluations/`), then a few photos by hand |
 | Pictures of Luna | Qwen-Image 2.1 Turbo, 8 steps; her profile picture and up to 4 other pictures of her are the face references | Sentia's ComfyUI, on the GPU | A few pictures by hand |
-| Voice messages | faster-whisper `LUNASOCIA_STT_MODEL` (default `large-v3-turbo`, int8) | Here, on the CPU | A few voice messages by hand |
-| Her voice | Kokoro 82M, in the voice chosen for her (16 female English and Hindi voices; `LUNASOCIA_TTS_VOICE`, default `af_heart`, for new girlfriends) | Here, on the CPU | Listen to a few replies |
+| Voice messages | faster-whisper `LUNASOCIA_STT_MODEL` (default `large-v3-turbo`, int8/float16) | Here, on the GPU (`LUNASOCIA_VOICE_DEVICE`, default `cuda`; `cpu` to keep it off the GPU), loaded at start | A few voice messages by hand |
+| Her voice | Kokoro 82M, in the voice chosen for her (16 female English and Hindi voices; `LUNASOCIA_TTS_VOICE`, default `af_heart`, for new girlfriends) | Here, on the GPU with Whisper (about 1.75 GB for both), loaded at start | Listen to a few replies |
 | Her memory | The chat model reads imported ChatGPT or Claude chats for facts about you, in the background | Sentia's Ollama, on the GPU, only while no reply is being written | Import a small export and read what she remembers |
 
 ## Luna ecosystem
@@ -66,11 +66,16 @@ her chats move to her, and her files to `/data/companions/<id>`.
 ## How a turn works
 
 1. What you send is stored in the `lunasocia` database, in its chat: your first message in a
-   new chat starts it and names it. A photo is first described by the
-   vision model; Luna reads that description in brackets, which is how she "sees" it.
+   new chat starts it and names it.
 2. Her reply streams from the chat model, with her persona (`ui/app/persona.py`), what she
    remembers about you (`ui/app/memory.py`), and the last 40 messages of this chat. Her own
    looks, described once from her profile picture, are part of it.
+   - **With a photo**, or a question about one from the last 4 messages ("which one is
+     better?", "what did I circle?"), the vision model answers instead. It sees her profile
+     picture (her own face), the chat's last 3 photos and pictures, and the last 16
+     messages. It then describes your photo once, and her later replies, from the chat model,
+     read that description in brackets. Right after, Socia swaps the chat model back onto the
+     GPU in the background, so your next message does not wait for it.
 3. When a picture fits (you ask for a selfie, or for her to step into your photo from this chat), she calls
    her `create_image` tool. Socia unloads every Ollama model, sends ComfyUI the Qwen-Image
    2.1 workflow (`ui/app/images.py`) with her profile picture, her other pictures and, if asked, your last photo
@@ -78,9 +83,12 @@ her chats move to her, and her files to `/data/companions/<id>`.
 
 4. When you ask for something one of your Luna apps does, she uses it first: see below.
 
-Measured on an RTX 5070 (12 GB): a reply starts in about 0.3 s once the chat model is
-loaded (about 25 s to load it); a picture takes about 40 s; her voice about 0.4 s per
-reply; a 4-second voice message about 4 s to transcribe.
+Measured on an RTX 5070 (12 GB): a reply starts in about 0.3 s, and is written in about 1 s,
+once the chat model is loaded; a reply to a photo takes about 15–20 s, most of it loading
+the vision model in the chat model's place, and the chat model is back about 4 s later; a
+picture takes about 40 s; her voice about 0.2 s per reply; a 30-second voice message about
+3 s to transcribe. At rest, her chat model and voice use about 8 GB of the GPU, and about
+10.5 GB while she looks at a photo.
 
 ## Her phone: your Luna apps
 
@@ -99,11 +107,15 @@ kept with the message (`messages.apps`).
   and Socia refreshes them itself; each refresh token works once. They are kept in the
   `apps_connection` table. If Sentia stops accepting them, Socia disconnects until you
   connect again.
-- **How she uses them.** Her context is 8k tokens, too small for every app's tools, so she
-  gets three: `app_tools` lists what one app can do, `app_tool_help` shows a tool's
-  arguments, and `use_app` runs it. Her prompt names the apps that answer now, with one
-  line each. She may take up to five rounds of these before she replies, and the page
-  shows "using Luna Vibia…" meanwhile. Each answer she reads is cut to 2,400 characters.
+- **How she uses them.** Her context is 8k tokens, too small for every app's tools. Before
+  she answers, the chat model is asked whether your message needs one of the running apps,
+  and if so which of its tools (at most three); those she gets as her own functions, such as
+  `visia__search_images`, with a line telling her to call one now. She also always has
+  three general ones: `app_tools` lists what one app can do, `app_tool_help` shows a tool's
+  arguments, and `use_app` runs it. A tool call she writes out as text instead of making it
+  is made for her and never shown. She may take up to five rounds before she replies, and
+  the page shows "using Luna Vibia…" meanwhile. Each answer she reads is cut to 2,400
+  characters.
 - **Where.** Socia calls each server on `luna_sentia_network` (`ui/app/apps.py`): Fiora,
   Lexia, Lumia, Vibia, Visia and Vita at `luna-<app>-mcp:8000/mcp`, and Sentia's at
   `luna-sentia-monitor:8001/mcp`. An app that is not running is left out.
@@ -113,8 +125,9 @@ kept with the message (`messages.apps`).
 ## Start
 
 Clone Socia beside Luna Sentia and start it; no `.env` is needed. Sentia's defaults pull
-`huihui_ai/qwen3-abliterated:14b` and the image model, and create the `lunasocia` role and database with the
-password `lunasocia-dev`, which is Socia's default too.
+`huihui_ai/qwen3-abliterated:8b`, `huihui_ai/qwen3-vl-abliterated:8b-instruct` and the image
+model, and create the `lunasocia` role and database with the password `lunasocia-dev`, which
+is Socia's default too. Socia uses the GPU for her voice (`gpus: all`), like Sentia's Ollama.
 
 ```bash
 git clone https://github.com/pranjallk1995/Luna_Sentia.git
@@ -146,7 +159,8 @@ listed in [Luna Sentia's Releases](https://github.com/pranjallk1995/Luna_Sentia#
 The `luna_socia_data` volume holds each girlfriend's profile picture and avatar crop
 (`/data/companions/<id>`) and her other pictures (`/data/companions/<id>/references`, added
 and removed in her settings), the pictures and photos of the chats (`/data/images`), and the
-voice models, downloaded the first time they are used (`/data/models`).
+voice models, downloaded the first time they are used (`/data/models`), with CUDA's kernels
+for this GPU (`/data/models/cuda-cache`): the first start compiles them, in about 30 s.
 
 The database keeps each girlfriend (`companions`: persona, voice, memory), her chats (`chats`,
 with their `messages` and `images`), and the conversations imported into her memory
@@ -167,6 +181,18 @@ only when) a picture is asked for, and time. The chat model stays resident, so c
 that it fits with Luna Sentia's `model_checks/check_model.py <model> --context 8192`;
 the full list of checks is in Sentia's
 [Changing a model](https://github.com/pranjallk1995/Luna_Sentia#changing-a-model).
+Before changing `LUNASOCIA_VISION_MODEL`, play the cat game with both (her photos of three
+cats, then "who is this?"), and check that it fits beside her voice when the chat model has
+left the GPU.
+
+## Notebooks
+
+[`notebooks/`](notebooks/README.md) runs Socia's code one step at a time in Jupyter, beside the
+running Socia, and shows every step's result: what the vision model is sent and answers, the
+chat as each model reads it, the tokens, and the GPU while each step runs. `01_photo_flow`
+follows a photo to her reply; `02_picture_flow` follows a picture from her call to ComfyUI.
+Start them with `./notebooks/start.sh`. Their outputs (your chats and her pictures) are never
+committed.
 
 ## Tests
 

@@ -14,8 +14,8 @@ from app.config import SociaConfig
 # Socia names itself to the monitor, which shows each call under its app.
 APP_HEADER = {"X-Luna-App": "socia"}
 PHOTO_PROMPT = ("Describe this photo for someone who cannot see it, in 2-4 sentences: who or what is in it (say "
-                "plainly when it is an animal, and what kind), the place, the mood, and any text. A name in a corner "
-                "is the photographer's watermark: call it that. Plain description, no preamble.")
+                "plainly when it is an animal, and what kind), the place, the mood, any text, and anything drawn on "
+                "it (a circle, an arrow) with what it marks. Plain description, no preamble.")
 LOOKS_PROMPT = ("Describe only the woman's lasting appearance in one or two sentences, for recognizing her: face, "
                 "hair, skin, eyes, build, age range. Not her clothes, pose or the scene. No preamble.")
 
@@ -28,16 +28,21 @@ class Ollama:
         self.client = httpx.AsyncClient(base_url=config.ollama_url, transport=transport, headers=APP_HEADER,
                                         timeout=httpx.Timeout(300.0, connect=10.0))
 
-    async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None) -> AsyncIterator[dict[str, Any]]:
-        """Stream Luna's reply: {"text": ...} pieces, then {"tool_calls": [...]} if she uses a tool."""
+    async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
+                   seeing: bool = False) -> AsyncIterator[dict[str, Any]]:
+        """Stream Luna's reply: {"text": ...} pieces, then {"tool_calls": [...]} if she uses a tool.
+
+        ``seeing``: the vision model answers instead, at its own context, with the photos in ``messages``.
+        """
         body = {
-            "model": self.config.chat_model,
+            "model": self.config.vision_model if seeing else self.config.chat_model,
             "messages": messages,
             "stream": True,
             # Qwen3 thinks before answering unless told not to; a text reply needs no reasoning.
             "think": False,
             # The repeat penalty keeps her from echoing her own recent words.
-            "options": {"num_ctx": self.config.context_tokens, "temperature": self.config.temperature,
+            "options": {"num_ctx": self.config.vision_context_tokens if seeing else self.config.context_tokens,
+                        "temperature": self.config.temperature,
                         "repeat_penalty": REPEAT_PENALTY, "repeat_last_n": 256},
         }
         if tools:
@@ -84,6 +89,14 @@ class Ollama:
         })
         reply.raise_for_status()
         return (reply.json().get("message") or {}).get("content", "").strip()
+
+    async def back_to_chat(self) -> None:
+        """After she looked at photos: the vision model leaves the GPU and her chat model comes back,
+        so her next text reply does not wait for the reload."""
+        await self.client.post("/api/generate", json={"model": self.config.vision_model, "keep_alive": 0})
+        reply = await self.client.post("/api/generate", json={
+            "model": self.config.chat_model, "options": {"num_ctx": self.config.context_tokens}})
+        reply.raise_for_status()
 
     async def unload_all(self) -> None:
         """Free the GPU for an image: every model Ollama holds, whichever app loaded it."""

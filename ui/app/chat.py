@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import json
 import logging
@@ -15,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageOps
 
-from app.apps import APP_TOOL_NAMES, APPS, LunaApps, app_tools_spec, apps_prompt
+from app.apps import APPS, DIRECT_SEPARATOR, LunaApps, app_tools_spec, apps_prompt, is_app_call
 from app.config import SociaConfig
 from app.images import ComfyUI
 from app.ollama import LOOKS_PROMPT, Ollama
@@ -43,6 +44,19 @@ SECRET_HINT = re.compile(
 OWNER_PICKED = re.compile(
     r"\bi(?:'m| am)\s+thinking\b|\bi(?:'ve| have)?\s+(?:picked|chosen|thought of|got)\b|\bi\s+(?:picked|chose)\b|"
     r"\byou\s+(?:guess|ask)\b|\bguess what i\b", re.IGNORECASE)
+# A message about a photo or picture just sent: the vision model then looks at it again to answer.
+ABOUT_PICTURE = re.compile(
+    r"\b(?:photos?|pics?|pictures?|images?|selfies?|circled?|marked|arrow|differen(?:t|ce)|compare|look(?:ing)? (?:at|closely|again)|"
+    r"zoom|in (?:it|this|that)|this one|that one|the one above|who(?:'s| is| are) (?:this|that|there|in)|"
+    r"which (?:one|is better))\b", re.IGNORECASE)
+# How far back the photo a message asks about may be.
+PICTURE_ASKED_WITHIN = 4
+SEEING = """
+
+Right now you see the pictures themselves: they are attached to {name}'s last message, in the order it lists. Look at
+them closely and answer from what you see: who is in them, faces, clothes, anything drawn or written on them, and how
+they differ. Your own face is the one in your profile picture, when it is attached. Earlier photos you know only from the
+descriptions in brackets."""
 # Rounds of app use one reply may take: listing an app's tools, reading one, using it, and a retry.
 MAX_APP_ROUNDS = 5
 SECRET_NUDGE = ("[If you are the one to pick a secret here (the thing to guess, an answer), pick it now and call "
@@ -112,6 +126,61 @@ def chat_title(text: str, photo: bool) -> str:
         return "Photo" if photo else ""
     limit = SociaConfig.CHAT_TITLE_CHARS
     return words if len(words) <= limit else words[:limit - 1].rstrip() + "…"
+
+
+# Before she answers, which app (if any) the owner's message needs, and which few of its tools: a small
+# chat model rarely starts on the apps by itself, so the code takes that first step for her.
+ROUTE_PROMPT = """{name}'s apps:
+{apps}
+
+The end of {name}'s chat with {her}, their girlfriend:
+{transcript}
+
+Does {name}'s last message ask {her} to use, check or look in one of these apps right now (play music, find or look
+at photos, lights, meals, money, documents, the server)? Answer with the app's key only (one of: {keys}), or NONE."""
+PICK_PROMPT = """{name} asked {her}: "{message}"
+
+{app}'s tools:
+{lines}
+
+Which tools does {her} need for this, at most three, most useful first? Answer with their exact names, comma-separated,
+and nothing else."""
+CHOSEN_APP = ("\n\nFor {name}'s last message, use {app}: your functions {functions} do it. Call the right one now, "
+              "in this reply, then tell {name} what it returned, in your own words. Never say you opened, checked or "
+              "saw something in an app without calling it.")
+# A tool call she wrote into her text instead of making it, as small models sometimes do:
+# {"name": ..., "arguments": {...}}, with or without <tool_call> tags around it.
+WRITTEN_CALL = re.compile(r"(?:</?tool_call>\s*)*(\{\s*\"name\"\s*:\s*\"[^\"]+\"\s*,\s*\"arguments\"\s*:.*\})\s*(?:</?tool_call>)*",
+                          re.DOTALL)
+CALL_MARKER = re.compile(r"</?tool_call>|\{\s*\"name\"\s*:")
+
+
+def written_calls(text: str) -> tuple[list[dict[str, Any]], str]:
+    """The tool calls she wrote out as text, and her text without them (and without stray tags)."""
+    calls = []
+    for match in WRITTEN_CALL.finditer(text):
+        try:
+            call = json.loads(match.group(1))
+        except ValueError:
+            continue
+        if isinstance(call, dict) and isinstance(call.get("name"), str):
+            calls.append({"function": {"name": call["name"], "arguments": call.get("arguments") or {}}})
+    cleaned = re.sub(r"</?tool_call>", "", WRITTEN_CALL.sub("", text)) if calls or CALL_MARKER.search(text) else text
+    return calls, cleaned.strip()
+
+
+def shown_part(said: str, shown: int) -> str:
+    """What of her reply so far can go to the page: everything before a tool call she started writing out,
+    holding back a tail that could be the start of one."""
+    marker = CALL_MARKER.search(said)
+    if marker:
+        end = marker.start()
+    else:
+        # A "<" or "{" near the end may be a tool call still arriving: wait for the next piece.
+        tail = max(len(said) - len("</tool_call>"), 0)
+        start = max(said.rfind("<", tail), said.rfind("{", tail))
+        end = start if start >= shown else len(said)
+    return said[shown:end] if end > shown else ""
 
 
 NAME_PROMPT = """Here is the start of a private chat between {name} and {her}, {name}'s girlfriend.
@@ -218,6 +287,30 @@ def normalized_photo(data: bytes) -> bytes:
     return buffer.getvalue()
 
 
+def sees_pictures(rows: list[dict[str, Any]]) -> bool:
+    """Whether she is to see the pictures themselves for this reply: the owner's last message has a photo,
+    or asks about a photo or picture of the last few messages."""
+    if not rows or rows[-1]["role"] != "user":
+        return False
+    if rows[-1].get("image_id"):
+        return True
+    recent = rows[-PICTURE_ASKED_WITHIN - 1:-1]
+    return any(row.get("image_file") for row in recent) and bool(ABOUT_PICTURE.search(rows[-1]["content"] or ""))
+
+
+def seen_size(data: bytes, side: int) -> bytes:
+    """A picture at most ``side`` on its longer side, as JPEG: what the vision model reads."""
+    image = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+    image.thumbnail((side, side))
+    buffer = io.BytesIO()
+    image.save(buffer, "JPEG", quality=90)
+    return buffer.getvalue()
+
+
+def ago(count: int) -> str:
+    return "just now" if count == 0 else "1 message ago" if count == 1 else f"{count} messages ago"
+
+
 class Conversation:
     def __init__(self, config: SociaConfig, store: SociaStore, ollama: Ollama, comfy: ComfyUI,
                  apps: LunaApps | None = None) -> None:
@@ -229,6 +322,9 @@ class Conversation:
         self.apps = apps
         # One reply at a time, as in a real conversation.
         self.turn = asyncio.Lock()
+        # Whether the last reply looked at pictures (with the vision model), and work left running after a reply.
+        self.saw = False
+        self.background: set[asyncio.Task] = set()
 
     def save_file(self, data: bytes, suffix: str) -> str:
         self.config.images_dir.mkdir(parents=True, exist_ok=True)
@@ -257,19 +353,63 @@ class Conversation:
             yield {"type": "user", "message": serialize(sent)}
             if photo:
                 yield {"type": "status", "text": "Looking at your photo"}
+            async for event in self.answer(companion, chat_id, name, timezone):
+                yield event
+            if photo:
+                # She saw the photo itself; a description of it stays for her later replies, which only read text.
+                # The vision model is still loaded, so this takes a second.
                 try:
                     note = await self.ollama.describe_photo(photo)
-                except Exception as error:  # noqa: BLE001 - she answers without seeing it
+                except Exception as error:  # noqa: BLE001 - later replies go without it
                     logger.warning("Could not describe the photo: %s", error)
                     note = "(the photo did not load for you)"
                 await asyncio.to_thread(self.store.set_photo_note, sent["id"], note)
-            async for event in self.answer(companion, chat_id, name, timezone):
-                yield event
+            if self.saw:
+                # The vision model took the chat model's place on the GPU: swap back while the owner reads.
+                task = asyncio.create_task(self.back_to_chat())
+                self.background.add(task)
+                task.add_done_callback(self.background.discard)
             if chat["named"] == "":
                 # Her first answer is in: name the chat after how it began.
                 named = await self.name_chat(chat_id, companion["name"], name)
                 if named:
                     yield {"type": "chat", "chat": serialize_chat(named)}
+
+    async def choose_app_tools(self, rows: list[dict[str, Any]], running: list[Any], her: str,
+                               name: str) -> tuple[Any, list[dict[str, Any]]] | None:
+        """The app the owner's last message needs and its few tools as her functions, or None."""
+        if not rows or rows[-1]["role"] != "user" or not (rows[-1]["content"] or "").strip():
+            return None
+        transcript = "\n".join(f"{her if row['role'] == 'luna' else name}: {' '.join((row['content'] or '').split())[:300]}"
+                               for row in rows[-4:] if row["content"])
+        keys = [app.key for app in running]
+        try:
+            answer = await self.ollama.complete(ROUTE_PROMPT.format(
+                name=name, her=her, transcript=transcript, keys=", ".join(keys),
+                apps="\n".join(f"- {app.key}: {app.purpose}" for app in running)))
+            key = next((k for k in keys if re.search(rf"\b{k}\b", answer.lower())), None)
+            if key is None:
+                return None
+            lines = await self.apps.tool_lines(key)
+            picked = await self.ollama.complete(PICK_PROMPT.format(
+                name=name, her=her, message=" ".join(rows[-1]["content"].split())[:300], app=APPS[key].name, lines=lines))
+            names = [n.strip(" `'\"-.") for n in re.split(r"[,\n]", picked) if n.strip(" `'\"-.")][:3]
+            specs = await self.apps.direct_specs(key, names)
+        except Exception as error:  # noqa: BLE001 - she answers with the three app tools alone
+            logger.warning("Could not choose an app for the message: %s", error)
+            return None
+        return (APPS[key], specs) if specs else None
+
+    async def back_to_chat(self) -> None:
+        """Her chat model back on the GPU after a reply that looked at pictures, before her next reply."""
+        async with self.turn:
+            if not self.saw:
+                return
+            try:
+                await self.ollama.back_to_chat()
+                self.saw = False
+            except Exception as error:  # noqa: BLE001 - her next reply loads it instead
+                logger.warning("Could not bring her chat model back: %s", error)
 
     async def name_chat(self, chat_id: int, her: str, name: str = "You") -> dict[str, Any] | None:
         """A short name for a chat from its first messages, by the chat model; None if it gave none."""
@@ -335,6 +475,33 @@ class Conversation:
         notes.write_text(looks)
         return looks
 
+    def with_pictures(self, messages: list[dict[str, Any]], rows: list[dict[str, Any]], companion_id: int,
+                      name: str) -> list[dict[str, Any]]:
+        """Her messages with the newest pictures of the chat (and her profile picture, so she knows her own
+        face) attached to the owner's last message, and a list there of what each one is."""
+        pictures, labels = [], []
+        profile = self.config.profile_path(companion_id)
+        if profile.exists():
+            pictures.append(seen_size(profile.read_bytes(), SociaConfig.PHOTO_SEEN_SIDE // 2))
+            labels.append("your profile picture: this is you, your face")
+        shown = [(len(rows) - 1 - index, row) for index, row in enumerate(rows) if row.get("image_file")]
+        for back, row in shown[-SociaConfig.PHOTOS_SEEN:]:
+            path = self.config.images_dir / row["image_file"]
+            if not path.exists():
+                continue
+            pictures.append(seen_size(path.read_bytes(), SociaConfig.PHOTO_SEEN_SIDE))
+            if row.get("image_kind") == "generated":
+                labels.append(f"the picture you sent of yourself {ago(back)}")
+            else:
+                said = " ".join((row["content"] or "").split())[:80]
+                labels.append(f"the photo {name} sent {ago(back)}" + (f' with "{said}"' if said else ""))
+        if not pictures:
+            return messages
+        listed = "; ".join(f"{number}) {label}" for number, label in enumerate(labels, start=1))
+        last = messages[-1]
+        return [*messages[:-1], {**last, "content": f"{last['content']}\n[Pictures you see now: {listed}]".strip(),
+                                 "images": [base64.b64encode(picture).decode() for picture in pictures]}]
+
     async def answer(self, companion: dict[str, Any], chat_id: int, name: str,
                      timezone: str | None) -> AsyncIterator[dict[str, Any]]:
         rows = await asyncio.to_thread(self.store.recent, chat_id, SociaConfig.HISTORY_MESSAGES)
@@ -342,7 +509,13 @@ class Conversation:
         notes = (chat or {}).get("notes") or ""
         prompt = system_prompt(companion, name, self.now(timezone), await self.looks(companion["id"]), notes)
         tools = TOOLS
-        if self.apps:
+        seeing = self.saw = sees_pictures(rows)
+        if seeing:
+            # A photo, or a question about one: the vision model looks at the pictures and answers as her,
+            # with the last few messages that fit beside them.
+            rows = rows[-SociaConfig.PHOTO_HISTORY_MESSAGES:]
+            prompt += SEEING.format(name=name or "love")
+        elif self.apps:
             try:
                 running = await self.apps.running()
             except Exception:  # noqa: BLE001 - she answers without the apps
@@ -351,18 +524,36 @@ class Conversation:
             if running:
                 prompt += apps_prompt(running, name or "love")
                 tools = [*TOOLS, *app_tools_spec([app.key for app in running])]
+                chosen = await self.choose_app_tools(rows, running, companion["name"], name or "love")
+                if chosen:
+                    app, specs = chosen
+                    tools = [*tools, *specs]
+                    functions = ", ".join(spec["function"]["name"] for spec in specs)
+                    prompt += CHOSEN_APP.format(name=name or "love", app=app.name, functions=functions)
         messages = [{"role": "system", "content": prompt}, *with_secret_nudge(model_messages(rows), notes)]
+        if seeing:
+            messages = await asyncio.to_thread(self.with_pictures, messages, rows, companion["id"], name or "love")
         text, calls, used_apps = "", [], []
         try:
             for _ in range(MAX_APP_ROUNDS + 1):
-                said, asked = "", []
-                async for piece in self.ollama.chat(messages, tools):
+                said, asked, shown = "", [], 0
+                async for piece in self.ollama.chat(messages, tools, seeing=seeing):
                     if "text" in piece:
                         said += piece["text"]
-                        yield {"type": "text", "text": piece["text"]}
+                        # A tool call she writes out as text never reaches the page.
+                        out = shown_part(said, shown)
+                        if out:
+                            shown += len(out)
+                            yield {"type": "text", "text": out}
                     asked += piece.get("tool_calls", [])
+                # The held-back tail, unless a written tool call starts in it.
+                rest = said[shown:]
+                if rest and not CALL_MARKER.search(rest):
+                    yield {"type": "text", "text": rest}
+                if not asked and CALL_MARKER.search(said):
+                    asked, said = written_calls(said)
                 text += said
-                app_calls = [c for c in asked if (c.get("function") or {}).get("name") in APP_TOOL_NAMES]
+                app_calls = [c for c in asked if is_app_call((c.get("function") or {}).get("name") or "")]
                 calls += [c for c in asked if c not in app_calls]
                 if not app_calls or not self.apps:
                     break
@@ -372,11 +563,15 @@ class Conversation:
                     arguments = call["function"].get("arguments") or {}
                     if isinstance(arguments, str):
                         arguments = json.loads(arguments or "{}")
-                    app = APPS.get(str(arguments.get("app", "")).lower().removeprefix("luna ").strip())
+                    function = call["function"]["name"]
+                    key, direct, tool_name = function.partition(DIRECT_SEPARATOR)
+                    if not direct:
+                        key, tool_name = str(arguments.get("app", "")).lower().removeprefix("luna ").strip(), str(arguments.get("tool") or "")
+                    app = APPS.get(key)
                     yield {"type": "status", "text": f"Using {app.name if app else 'an app'}"}
-                    results.append({"role": "tool", "content": await self.apps.handle(call["function"]["name"], arguments)})
-                    used = {"app": app.key, "tool": str(arguments.get("tool") or "")} if app else None
-                    if used and call["function"]["name"] == "use_app" and used not in used_apps:
+                    results.append({"role": "tool", "content": await self.apps.handle(function, arguments)})
+                    used = {"app": app.key, "tool": tool_name} if app else None
+                    if used and (direct or function == "use_app") and used not in used_apps:
                         # Shown under her reply, so the owner sees what she did.
                         used_apps.append(used)
                 messages = [*messages, {"role": "assistant", "content": said, "tool_calls": app_calls}, *results]
@@ -422,7 +617,7 @@ class Conversation:
                 results.append({"role": "tool", "content": "The picture was sent." if image_id else "The camera failed."})
             follow = [*messages, {"role": "assistant", "content": "", "tool_calls": used}, *results]
             try:
-                async for piece in self.ollama.chat(follow):
+                async for piece in self.ollama.chat(follow, seeing=seeing):
                     if "text" in piece:
                         text += piece["text"]
                         yield {"type": "text", "text": piece["text"]}

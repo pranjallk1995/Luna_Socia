@@ -1,0 +1,8 @@
+# Her voice on the GPU: CUDA 12 and cuDNN 9, for faster-whisper (CTranslate2) and Kokoro (onnxruntime-gpu,
+# installed by the Dockerfile in place of onnxruntime).
+nvidia-cublas-cu12==12.9.3.13
+nvidia-cudnn-cu12==9.28.1.4
+nvidia-curand-cu12
+nvidia-cufft-cu12
+nvidia-cuda-runtime-cu12
+nvidia-cuda-nvrtc-cu12==12.9.86

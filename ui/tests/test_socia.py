@@ -5,6 +5,7 @@ import io
 import json
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,7 +14,7 @@ import httpx
 from PIL import Image
 from starlette.testclient import TestClient
 
-from app.chat import (PICTURE_PROMISE, clean_name, Conversation, model_messages, with_secret_nudge, without_written_pictures,
+from app.chat import (PICTURE_PROMISE, written_calls, clean_name, Conversation, model_messages, with_secret_nudge, without_written_pictures,
                       written_notes, written_picture)
 from app.memory import ExportError, MemoryReader, fact_lines, parse_export, their_words
 from app.config import SociaConfig
@@ -204,7 +205,8 @@ class MemoryStore:
         image = self.image(image_id) if image_id else None
         row = {"id": len(self.messages) + 1, "chat_id": chat_id, "role": role, "content": content,
                "image_id": image_id, "photo_note": photo_note, "reaction": None, "apps": apps or None, "created_at": NOW,
-               "image_kind": image and image["kind"], "image_prompt": image and image["prompt"]}
+               "image_kind": image and image["kind"], "image_prompt": image and image["prompt"],
+               "image_file": image and image["file"]}
         self.messages.append(row)
         return row
 
@@ -417,7 +419,9 @@ class ConversationTests(unittest.TestCase):
 
         async def collect():
             companion = self.store.companion((her or self.her)["id"])
-            return [event async for event in conversation.send(companion, chat_id, text, photo, "Pranjall", "Asia/Kolkata")]
+            events = [event async for event in conversation.send(companion, chat_id, text, photo, "Pranjall", "Asia/Kolkata")]
+            await asyncio.gather(*conversation.background)
+            return events
 
         import app.images
         app.images.POLL_SECONDS = 0
@@ -479,6 +483,91 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual({tool["function"]["name"] for tool in first["tools"]} & {"app_tools", "use_app"},
                          {"app_tools", "use_app"})
         self.assertEqual(last["messages"][-1], {"role": "tool", "content": "Playing Kesariya on the speakers."})
+
+    def test_a_tool_call_she_writes_out_is_made_and_never_shown(self):
+        from app.apps import APPS
+
+        class Apps:
+            used = []
+
+            async def running(self):
+                return [APPS["visia"]]
+
+            async def handle(self, name, arguments):
+                self.used.append((name, arguments))
+                return "- list_images: List images."
+
+        # Her reply in chat 9 on 16 November, streamed in pieces.
+        written = [{"content": "</tool_"}, {"content": 'call>\n{"name": "app_tools", "arguments": {"app": "visia"}}\n'},
+                   {"content": "</tool_call>"}]
+        apps = Apps()
+        events, _ = self.run_turn([written, [{"content": "Found your favourites ❤️"}]], text="they are in visia!", apps=apps)
+        self.assertEqual(apps.used, [("app_tools", {"app": "visia"})])
+        shown = "".join(e["text"] for e in events if e["type"] == "text")
+        self.assertEqual(shown, "Found your favourites ❤️")
+        self.assertEqual(events[-2]["message"]["content"], "Found your favourites ❤️")
+        self.assertEqual(written_calls("Sure 😘 <tool_call>{\"name\": \"x\", \"arguments\": {}}</tool_call>"),
+                         ([{"function": {"name": "x", "arguments": {}}}], "Sure 😘"))
+        self.assertEqual(written_calls("Just text {not a call}"), ([], "Just text {not a call}"))
+
+    def test_the_app_and_tools_a_message_needs_are_handed_to_her(self):
+        from app.apps import APPS
+
+        class Apps:
+            used = []
+
+            async def running(self):
+                return [APPS["visia"], APPS["vibia"]]
+
+            async def tool_lines(self, key):
+                return "- search_images: Search.\n- list_images: List."
+
+            async def direct_specs(self, key, names):
+                self.picked = (key, names)
+                return [{"type": "function", "function": {"name": f"{key}__{n}", "description": "", "parameters": {}}}
+                        for n in names]
+
+            async def handle(self, name, arguments):
+                self.used.append((name, arguments))
+                return "3 favourite photos: beach.jpg, cats.jpg, cake.jpg"
+
+        class Model(Ollama):
+            answers = iter(["visia", "search_images, list_images"])
+
+            async def complete(self, prompt):
+                return next(self.answers, "Favourite photos")
+
+        search = {"function": {"name": "visia__search_images", "arguments": {"query": "favourite"}}}
+        ollama_transport, comfy_transport = fake_services([[{"content": "", "tool_calls": [search]}],
+                                                          [{"content": "You have 3 favourites 😍"}]], seen := {})
+        apps = Apps()
+        conversation = Conversation(self.config, self.store, Model(self.config, ollama_transport),
+                                    ComfyUI(self.config, comfy_transport), apps)
+
+        async def collect():
+            return [e async for e in conversation.send(self.store.companion(self.her["id"]), None,
+                                                       "you see my fav images?", None, "Pranjall", "Asia/Kolkata")]
+
+        events = asyncio.run(collect())
+        self.assertEqual(apps.picked, ("visia", ["search_images", "list_images"]))
+        first = streamed(seen)[0]
+        self.assertIn("visia__search_images", {tool["function"]["name"] for tool in first["tools"]})
+        self.assertIn("use Luna Visia", first["messages"][0]["content"])
+        self.assertEqual(apps.used, [("visia__search_images", {"query": "favourite"})])
+        self.assertEqual(events[-2]["message"]["apps"], [{"app": "visia", "tool": "search_images"}])
+        self.assertEqual(events[-2]["message"]["content"], "You have 3 favourites 😍")
+
+    def test_no_app_is_chosen_for_a_message_that_needs_none(self):
+        from app.apps import APPS
+
+        class Apps:
+            async def running(self):
+                return [APPS["visia"]]
+
+        _, seen = self.run_turn([[{"content": "Hi ❤️"}]], text="hi", apps=Apps(), completion="NONE")
+        first = streamed(seen)[0]
+        self.assertFalse(any("__" in tool["function"]["name"] for tool in first["tools"]))
+        self.assertNotIn("For Pranjall's last message, use", first["messages"][0]["content"])
 
     def test_without_the_apps_she_has_no_app_tools(self):
         _, seen = self.run_turn([[{"content": "Hi ❤️"}]], text="hi")
@@ -552,6 +641,36 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual((asked[0]["model"], asked[0]["options"]["num_ctx"]),
                          ("huihui_ai/qwen3-vl-abliterated:4b-instruct", 4096))
 
+    def test_she_looks_again_when_asked_about_a_recent_photo_and_chats_as_usual_otherwise(self):
+        events, _ = self.run_turn([[{"content": "Cute! 😍"}]], text="Look...", photo=png("red"))
+        chat_id = events[0]["chat"]["id"]
+        _, seen = self.run_turn([[{"content": "A red circle around your hand 👀"}]],
+                                text="what did I mark in the red circle?", chat_id=chat_id)
+        asked = streamed(seen)[0]
+        self.assertEqual(asked["model"], self.config.vision_model)
+        self.assertIn("2) the photo Pranjall sent 2 messages ago", asked["messages"][-1]["content"])
+        # The earlier photo is still in the chat as its description, for the context around it.
+        self.assertIn("[Photo: A red square.]", asked["messages"][-3]["content"])
+        _, seen = self.run_turn([[{"content": "Rain again? ☔"}]], text="It's raining", chat_id=chat_id)
+        self.assertEqual(streamed(seen)[0]["model"], self.config.chat_model)
+        self.assertNotIn("unloaded", seen)
+        self.assertNotIn("images", streamed(seen)[0]["messages"][-1])
+
+    def test_which_messages_let_her_see_the_pictures(self):
+        from app.chat import sees_pictures
+
+        photo = {"role": "user", "content": "look", "image_file": "a.jpg", "image_id": 1}
+        her = {"role": "luna", "content": "wow", "image_file": None}
+        picture = {"role": "luna", "content": "me!", "image_file": "b.png", "image_id": 2}
+        ask = lambda text: {"role": "user", "content": text, "image_file": None}  # noqa: E731
+        self.assertTrue(sees_pictures([photo]))
+        self.assertTrue(sees_pictures([photo, her, ask("which one is better?")]))
+        self.assertTrue(sees_pictures([picture, ask("is this one you?")]))
+        self.assertFalse(sees_pictures([photo, her, ask("ok going to the gym")]))
+        self.assertFalse(sees_pictures([ask("send me a photo"), her]))
+        old = [photo, *[her, ask("hmm")] * 3, ask("what's in the photo?")]
+        self.assertFalse(sees_pictures(old))
+
     def test_she_sees_a_photo_and_steps_into_it(self):
         call = {"function": {"name": "create_image", "arguments": {
             "description": "standing beside them, smiling", "include_luna": True, "use_their_photo": True}}}
@@ -559,11 +678,23 @@ class ConversationTests(unittest.TestCase):
                                      text="add yourself here", photo=png("red"))
         self.assertEqual([e["type"] for e in events],
                          ["chat", "user", "status", "image_started", "image", "text", "done", "chat"])
-        # The vision model's description reached the chat model.
-        self.assertIn("[Photo: A red square.]", streamed(seen)[0]["messages"][-1]["content"])
-        # At the context Visia, Lexia, Vibia and Fiora ask for, so Ollama keeps the one copy loaded.
+        # The vision model answers as her, seeing her profile picture and the photo itself, at its own context.
+        first = streamed(seen)[0]
+        self.assertEqual((first["model"], first["options"]["num_ctx"]), (self.config.vision_model, 8192))
+        self.assertEqual(len(first["messages"][-1]["images"]), 2)
+        self.assertIn("1) your profile picture: this is you, your face; 2) the photo Pranjall sent just now",
+                      first["messages"][-1]["content"])
+        self.assertIn("Right now you see the pictures themselves", first["messages"][0]["content"])
+        # Her caption after the picture comes from the same model, so nothing is swapped in between.
+        self.assertEqual(streamed(seen)[1]["model"], self.config.vision_model)
+        # Afterwards the photo is described once for her later replies, which read only text.
+        sent = next(m for m in self.store.messages if m["role"] == "user")
+        self.assertEqual(sent["photo_note"], "A red square.")
         looks = [c for c in seen["completions"] if c["model"] == self.config.vision_model]
-        self.assertEqual({c["options"]["num_ctx"] for c in looks}, {16_384})
+        self.assertEqual({c["options"]["num_ctx"] for c in looks}, {8192})
+        # Then the vision model leaves the GPU and her chat model comes back, before her next reply.
+        self.assertEqual(seen["unloaded"][-2:], [{"model": self.config.vision_model, "keep_alive": 0},
+                                                 {"model": self.config.chat_model, "options": {"num_ctx": 8192}}])
         # She knows her own looks, read once from her profile picture.
         self.assertIn("A photo of a woman who looks like this is you.", streamed(seen)[0]["messages"][0]["content"])
         self.assertEqual(self.profile.with_suffix(".txt").read_text(), "A red square.")
@@ -571,7 +702,7 @@ class ConversationTests(unittest.TestCase):
         encode = seen["graph"]["encode"]["inputs"]
         self.assertIn("<image2> into <image1>", encode["prompt"])
         self.assertEqual(seen["graph"]["ref1"]["inputs"]["image"], "ref1.png")
-        self.assertEqual(seen["unloaded"], [{"model": "qwen3:14b", "keep_alive": 0}])
+        self.assertEqual(seen["unloaded"][0], {"model": "qwen3:14b", "keep_alive": 0})
         self.assertTrue(seen["freed"])
         saved = events[-2]["message"]
         self.assertEqual((saved["content"], saved["image_kind"]), ("Us! 🥰", "generated"))
@@ -1307,6 +1438,39 @@ class LoopAndLanguageTests(unittest.TestCase):
         voice.whisper = Whisper()
         self.assertEqual(voice.language(None), "hi")
         self.assertEqual(config().stt_languages, ("en", "hi"))
+
+
+class VoiceDeviceTests(unittest.TestCase):
+    def test_her_voice_runs_on_the_gpu_and_falls_back_to_the_cpu(self):
+        import sys
+        import types
+        from dataclasses import replace
+
+        from app.voice import Voice
+
+        made = []
+
+        class WhisperModel:
+            def __init__(self, name, device, compute_type, **kwargs):
+                made.append((device, compute_type))
+                if device == "cuda" and broken:
+                    raise RuntimeError("CUDA failed with error no CUDA-capable device is detected")
+
+        fake = types.ModuleType("faster_whisper")
+        fake.WhisperModel = WhisperModel
+        with mock.patch.dict(sys.modules, {"faster_whisper": fake}):
+            broken = False
+            voice = Voice(replace(config(), voice_device="cuda"))
+            voice._load_whisper()
+            self.assertEqual((made[-1], voice.whisper_device), (("cuda", "int8_float16"), "GPU (int8/float16)"))
+            broken = True
+            voice = Voice(replace(config(), voice_device="cuda"))
+            voice._load_whisper()
+            self.assertEqual((made[-1], voice.whisper_device), (("cpu", "int8"), "CPU (int8)"))
+            voice = Voice(replace(config(), voice_device="cpu"))
+            self.assertEqual(voice.hearing.state(), (False, "loads at start (CPU); stays loaded"))
+            voice._load_whisper()
+            self.assertEqual(made[-1], ("cpu", "int8"))
 
 
 class DownloadTests(unittest.TestCase):

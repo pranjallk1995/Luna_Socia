@@ -6,7 +6,9 @@ refresh tokens that come back. That token names no app, so every Luna MCP server
 accepts it, as the owner. The owner can disconnect at any time.
 
 The chat model's context is small, so Luna gets three tools rather than every app's:
-one to list an app's tools, one to see a tool's arguments, and one to use it.
+one to list an app's tools, one to see a tool's arguments, and one to use it. A small chat
+model rarely starts that on its own, so before she answers, the app and the few tools a
+message needs are picked for her and handed to her as plain functions (``app__tool``).
 """
 
 from __future__ import annotations
@@ -230,8 +232,24 @@ class LunaApps:
             {"key": app.key, "name": app.name, "purpose": app.purpose, "running": app.key in running}
             for app in LUNA_APPS]}
 
+    async def tool_lines(self, key: str) -> str:
+        """An app's tools, one line each, for choosing among them."""
+        return "\n".join(f"- {tool.name}: {first_sentence(tool.description)}" for tool in await self.tools(key))
+
+    async def direct_specs(self, key: str, names: list[str]) -> list[dict[str, Any]]:
+        """Some of an app's tools as her own functions, named ``app__tool``, with their real arguments."""
+        tools = {tool.name: tool for tool in await self.tools(key)}
+        return [{"type": "function", "function": {
+            "name": f"{key}{DIRECT_SEPARATOR}{name}",
+            "description": f"{APPS[key].name}: {' '.join((tools[name].description or '').split())[:600]}",
+            "parameters": tools[name].inputSchema or {"type": "object", "properties": {}}}}
+            for name in names if name in tools]
+
     async def handle(self, name: str, arguments: dict[str, Any]) -> str:
-        """Run one of her app tools and return what she reads back."""
+        """Run one of her app tools (or an ``app__tool`` function) and return what she reads back."""
+        if DIRECT_SEPARATOR in name:
+            key, tool_name = name.split(DIRECT_SEPARATOR, 1)
+            return await self.handle("use_app", {"app": key, "tool": tool_name, "arguments": arguments})
         key = str(arguments.get("app") or "").lower().removeprefix("luna ").strip()
         if key not in APPS:
             return f"There is no Luna app called {arguments.get('app')!r}. The apps are: {', '.join(APPS)}."
@@ -263,6 +281,14 @@ class LunaApps:
 
 
 APP_TOOL_NAMES = {"app_tools", "app_tool_help", "use_app"}
+# An app tool handed to her directly is named app__tool, e.g. visia__search_images.
+DIRECT_SEPARATOR = "__"
+
+
+def is_app_call(name: str) -> bool:
+    """Whether a function she called is one of the apps': a meta tool or an ``app__tool``."""
+    key, separator, _ = name.partition(DIRECT_SEPARATOR)
+    return name in APP_TOOL_NAMES or (bool(separator) and key in APPS)
 
 
 def app_tools_spec(keys: list[str]) -> list[dict[str, Any]]:

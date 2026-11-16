@@ -28,6 +28,11 @@ class SociaConfig:
     # More pictures of Luna besides her profile picture, sent with it as references for her face.
     # Each one makes a picture slower and needs more GPU memory.
     MAX_REFERENCES: ClassVar[int] = 4
+    # When the vision model answers about photos: the messages it reads, the photos and pictures it
+    # sees (newest first), and their longer side; it reads about one token per 32 x 32 pixels.
+    PHOTO_HISTORY_MESSAGES: ClassVar[int] = 16
+    PHOTOS_SEEN: ClassVar[int] = 3
+    PHOTO_SEEN_SIDE: ClassVar[int] = 1024
     # The longest one image may take, including loading the model from disk.
     IMAGE_TIMEOUT_SECONDS: ClassVar[float] = 600.0
     # The longest name a girlfriend can have, and what the owner writes about her.
@@ -52,15 +57,14 @@ class SociaConfig:
     public_url: str
     ollama_url: str = "http://luna-sentia-ollama:11434"
     comfyui_url: str = "http://luna-sentia-comfyui:8188"
-    chat_model: str = "huihui_ai/qwen3-abliterated:14b"
-    vision_model: str = "qwen3-vl:8b-instruct"
+    chat_model: str = "huihui_ai/qwen3-abliterated:8b"
+    vision_model: str = "huihui_ai/qwen3-vl-abliterated:8b-instruct"
     # 8k holds the last 40 short messages and leaves room on the GPU; it must equal
     # SENTIA_RESIDENT_CONTEXT, or Ollama reloads the model for every reply.
     context_tokens: int = 8192
-    # The vision model's context. 16k matches the apps that share qwen3-vl:8b-instruct, so
-    # they share one copy; a vision model of Socia's own needs only room for a photo (4k),
-    # and must then equal its context in SENTIA_RESIDENT_CONTEXT.
-    vision_context_tokens: int = 16384
+    # The vision model's context. It sees the photos and answers as her, with her prompt and the
+    # last PHOTO_HISTORY_MESSAGES messages: 8k holds that and three photos.
+    vision_context_tokens: int = 8192
     temperature: float = 0.8
     # Qwen-Image 2.1's pixel budget: about resolution x resolution, keeping the aspect ratio.
     image_resolution: int = 1024
@@ -72,6 +76,8 @@ class SociaConfig:
     # 99, which on a short or noisy clip can be a language nobody spoke.
     stt_languages: tuple[str, ...] = ("en", "hi")
     tts_voice: str = "af_heart"
+    # Where her voice runs: "cuda" (the GPU, loaded at start and kept) or "cpu".
+    voice_device: str = "cuda"
     data_dir: Path = Path("/data")
     # Shared with Luna Sentia (LUNASOCIA_API_TOKEN in both .env files), whose model monitor
     # asks GET /api/models about the voice models; blank lets only the owner's session ask.
@@ -108,6 +114,7 @@ class SociaConfig:
             stt_languages=tuple(code.strip().lower() for code in setting("LUNASOCIA_STT_LANGUAGES", "en,hi").split(",")
                                 if code.strip()),
             tts_voice=setting("LUNASOCIA_TTS_VOICE", cls.tts_voice),
+            voice_device=setting("LUNASOCIA_VOICE_DEVICE", cls.voice_device).lower(),
             data_dir=Path(setting("LUNASOCIA_DATA_DIR", "/data")),
             api_token=os.getenv("LUNASOCIA_API_TOKEN", "").strip(),
         )

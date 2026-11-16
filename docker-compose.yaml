@@ -1,27 +1,33 @@
 services:
   # Luna Socia: the owner's chat with Luna by text, voice and pictures. Her chat and
   # vision models come from Luna Sentia's Ollama (through its monitor), her pictures from
-  # Sentia's ComfyUI; voice runs here on the CPU. The conversation is in the lunasocia
-  # database, the pictures, her profile picture and the voice models on the data volume.
+  # Sentia's ComfyUI; her voice (Whisper and Kokoro, about 1.1 GB) runs here on the GPU.
+  # The conversation is in the lunasocia database, the pictures, her profile picture and
+  # the voice models on the data volume.
   ui:
     build: ./ui
     image: ghcr.io/pranjallk1995/luna-socia-ui:${LUNA_IMAGE_TAG:-v0.7.0}
     working_dir: /workspace/ui
     restart: unless-stopped
+    gpus: all
     environment:
       LUNA_SSO_URL: ${LUNA_SSO_URL:-http://localhost:19001}
       LUNA_SSO_INTERNAL_URL: ${LUNA_SSO_INTERNAL_URL:-http://luna-sentia-auth:8000}
       DATABASE_URL: postgresql://lunasocia:${POSTGRES_PASSWORD:-lunasocia-dev}@luna-sentia-db:5432/lunasocia
       UI_PUBLIC_URL: ${UI_PUBLIC_URL:-http://localhost:18503}
-      LUNASOCIA_CHAT_MODEL: ${LUNASOCIA_CHAT_MODEL:-huihui_ai/qwen3-abliterated:14b}
-      LUNASOCIA_VISION_MODEL: ${LUNASOCIA_VISION_MODEL:-qwen3-vl:8b-instruct}
+      LUNASOCIA_CHAT_MODEL: ${LUNASOCIA_CHAT_MODEL:-huihui_ai/qwen3-abliterated:8b}
+      # Sees the photos and answers as her when a message has one: it takes the chat
+      # model's place on the GPU for that reply.
+      LUNASOCIA_VISION_MODEL: ${LUNASOCIA_VISION_MODEL:-huihui_ai/qwen3-vl-abliterated:8b-instruct}
       # Must equal SENTIA_RESIDENT_CONTEXT, or Ollama reloads her model for every reply.
       LUNASOCIA_CONTEXT_TOKENS: ${LUNASOCIA_CONTEXT_TOKENS:-8192}
-      # 16k shares qwen3-vl:8b-instruct with the other apps; a vision model of her own: 4096.
-      LUNASOCIA_VISION_CONTEXT_TOKENS: ${LUNASOCIA_VISION_CONTEXT_TOKENS:-16384}
+      # Her prompt, the last 16 messages and up to three photos.
+      LUNASOCIA_VISION_CONTEXT_TOKENS: ${LUNASOCIA_VISION_CONTEXT_TOKENS:-8192}
       LUNASOCIA_STT_MODEL: ${LUNASOCIA_STT_MODEL:-large-v3-turbo}
       LUNASOCIA_STT_LANGUAGES: ${LUNASOCIA_STT_LANGUAGES:-en,hi}
       LUNASOCIA_TTS_VOICE: ${LUNASOCIA_TTS_VOICE:-af_heart}
+      # cuda: her voice on the GPU, loaded at start; cpu: on the CPU, as before.
+      LUNASOCIA_VOICE_DEVICE: ${LUNASOCIA_VOICE_DEVICE:-cuda}
       # Luna Sentia's model monitor asks with it about the voice models; same value there.
       LUNASOCIA_API_TOKEN: ${LUNASOCIA_API_TOKEN:-lunasocia-dev-token-for-localhost-only}
       TZ: Asia/Kolkata

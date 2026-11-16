@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 import uvicorn
@@ -56,7 +57,10 @@ def main() -> None:
     apps = LunaApps(config, store)
     conversation = Conversation(config, store, ollama, comfy, apps)
     reader = MemoryReader(store, ollama, conversation.turn)
-    app = create_app(config, store, conversation, comfy, Voice(config), reader=reader, apps=apps)
+    voice = Voice(config)
+    # Her voice loads and warms up beside the server starting, not on the first voice message.
+    threading.Thread(target=voice.preload, name="voice-preload", daemon=True).start()
+    app = create_app(config, store, conversation, comfy, voice, reader=reader, apps=apps)
     uvicorn.run(app, host="0.0.0.0", port=SociaConfig.PORT, proxy_headers=True, forwarded_allow_ips="*",
                 log_level="info")
 

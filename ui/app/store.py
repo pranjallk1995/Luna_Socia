@@ -138,7 +138,7 @@ LEFT JOIN LATERAL (SELECT count(*) AS sources, count(facts) AS read FROM memory_
                    WHERE companion_id = c.id) mem ON true"""
 
 MESSAGE_COLUMNS = """m.id, m.chat_id, m.role, m.content, m.image_id, m.photo_note, m.reaction, m.apps, m.created_at,
-                     i.kind AS image_kind, i.prompt AS image_prompt"""
+                     i.kind AS image_kind, i.prompt AS image_prompt, i.file AS image_file"""
 
 
 class SociaStore:
