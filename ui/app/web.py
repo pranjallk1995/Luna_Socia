@@ -28,6 +28,7 @@ from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Redire
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from app.apps import LunaApps
 from app.avatar import Avatar
 from app.chat import Conversation, normalized_photo, serialize, serialize_chat, serialize_companion
 from app.config import SociaConfig
@@ -110,7 +111,8 @@ def first_name(user: dict[str, Any]) -> str:
 
 
 def create_app(config: SociaConfig, store: SociaStore, conversation: Conversation, comfy: ComfyUI, voice: Voice,
-               auth_transport: httpx.AsyncBaseTransport | None = None, reader: MemoryReader | None = None) -> Starlette:
+               auth_transport: httpx.AsyncBaseTransport | None = None, reader: MemoryReader | None = None,
+               apps: LunaApps | None = None) -> Starlette:
     sessions = Sessions(config, auth_transport)
     samples: dict[str, bytes] = {}
 
@@ -575,6 +577,40 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
                 return user
         return JSONResponse(model_usage.report("socia"))
 
+    async def apps_status(request: Request) -> Response:
+        """Whether Socia is connected to the owner's Luna apps, and which of them answer."""
+        user = await owner(request)
+        if isinstance(user, Response):
+            return user
+        if apps is None:
+            return JSONResponse({"connected": False, "apps": []})
+        if request.method == "DELETE":
+            await apps.disconnect()
+        return JSONResponse(await apps.status())
+
+    async def apps_connect(request: Request) -> Response:
+        """Send the owner to Luna Sentia's sign-on to approve Socia using their Luna apps."""
+        user = await owner(request)
+        if isinstance(user, Response):
+            return user
+        try:
+            return RedirectResponse(await apps.start(), 303)
+        except Exception as error:  # noqa: BLE001 - shown on the page
+            return message_page("Could not connect", f"Luna Sentia's sign-on did not answer: {error}", 502)
+
+    async def apps_callback(request: Request) -> Response:
+        user = await owner(request)
+        if isinstance(user, Response):
+            return user
+        params = request.query_params
+        if params.get("error"):
+            return RedirectResponse("/?apps=declined", 303)
+        try:
+            await apps.finish(params.get("code", ""), params.get("state", ""))
+        except Exception as error:  # noqa: BLE001 - shown on the page
+            return message_page("Could not connect", str(error), 400)
+        return RedirectResponse("/?apps=connected", 303)
+
     async def logout(request: Request) -> Response:
         return RedirectResponse(f"{config.auth_public_url}/logout?next={quote(config.public_url + '/', safe='')}", 303)
 
@@ -616,6 +652,9 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         Route("/api/speech/{message_id:int}", speech),
         Route("/api/status", status),
         Route("/api/models", models),
+        Route("/api/apps", apps_status, methods=["GET", "DELETE"]),
+        Route("/apps/connect", apps_connect),
+        Route("/apps/callback", apps_callback),
         Route("/logout", logout),
         Route("/health", health),
         Mount("/static", Assets(directory=STATIC), name="static"),

@@ -148,6 +148,11 @@ How you text:
 - Every reply answers {name}'s last message. You never send the same message twice, and never reuse a line.
 - {language}
 
+- Private notes: whenever you pick a secret (the thing in a guessing game, a surprise), keep a score or agree on
+  a plan, write it down at once by calling note. Your notes for this chat are shown to you below; {name} never
+  sees them. Keep to them: in a game, every answer must be true of the secret you wrote down.
+- Games and long talks: keep track of everything said so far in this chat and build on it; in a guessing game,
+  use every answer {name} already gave before asking or guessing again.
 - Reactions: you can react to {name}'s message with one emoji ({reactions}) by calling react, as people do on
   their phones, now and then when a message really moves you or makes you laugh, never on every message. You still
   answer in text as well.
@@ -157,9 +162,10 @@ You would say "{example}" That shows the tone only: never repeat its words, and 
 
 Photos: when {name} sends a photo, you see a description of it in square brackets; react as if you saw it.
 Pictures of yourself: when {name} asks for a selfie or a photo of you, or asks you to put yourself into a photo
-they sent, or when a picture truly fits the moment, call create_image. Describe the scene in detail in English:
+they sent, call create_image. Describe the scene in detail in English:
 place, light, what you wear, your pose and expression, and the camera (selfie, mirror shot, candid).
-Send a short text along with it. A picture exists only when you call create_image: never say one is
+Send a short text along with it. Only then do you send pictures: a photo {name} sends gets a reply in words,
+never a picture back. A picture exists only when you call create_image: never say one is
 coming, sent or "here" (let me show you, there!, here you go) without calling it in that same reply.
 {pictures}"""
 
@@ -204,6 +210,21 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "note",
+            "description": ("Write down something private to remember in this chat, naming it exactly: the secret you "
+                            "picked for a game (\"Secret: a penguin\"), the score, a plan. They never see it; your notes "
+                            "are shown to you on every message."),
+            "parameters": {
+                "type": "object",
+                "properties": {"text": {"type": "string",
+                                        "description": "What to remember, in a short line, such as \"Secret: a penguin\"."}},
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "react",
             "description": "React to their last message with one emoji, shown on it, as on a phone.",
             "parameters": {
@@ -218,6 +239,7 @@ TOOLS = [
 ]
 
 
+NOTES = "\n\nYour private notes for this chat (only you see them; keep to them):\n{notes}"
 LOOKS = "\n\nWhat you look like, from your profile picture: {looks} A photo of a woman who looks like this is you."
 MEMORY = (
     "\n\nWhat you know about {name} from before (from their earlier chats). Bring it up naturally when it fits, "
@@ -236,9 +258,10 @@ def example(persona: dict[str, str]) -> str:
 
 
 def system_prompt(
-    companion: dict[str, Any], name: str, now: datetime, looks: str = ""
+    companion: dict[str, Any], name: str, now: datetime, looks: str = "", notes: str = ""
 ) -> str:
-    """Her system prompt: her persona, the time, her looks and what she remembers about {name}."""
+    """Her system prompt: her persona, the time, her looks, what she remembers about {name},
+    and her private notes for this chat."""
     persona = clean_persona(companion.get("persona") or {})
     name = name or "love"
     about = persona["about"].strip()
@@ -262,6 +285,9 @@ def system_prompt(
     memory = str(companion.get("memory") or "").strip()
     if memory:
         prompt += MEMORY.format(name=name, memory=memory)
+    lines = [line.strip() for line in notes.splitlines() if line.strip()]
+    if lines:
+        prompt += NOTES.format(notes="\n".join(f"- {line}" for line in lines))
     return prompt
 
 

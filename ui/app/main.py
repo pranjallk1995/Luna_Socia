@@ -7,6 +7,7 @@ import time
 
 import uvicorn
 
+from app.apps import LunaApps
 from app.chat import Conversation
 from app.config import SociaConfig
 from app.images import ComfyUI
@@ -52,9 +53,10 @@ def main() -> None:
     adopt_legacy_files(config, store)
     comfy = ComfyUI(config)
     ollama = Ollama(config)
-    conversation = Conversation(config, store, ollama, comfy)
+    apps = LunaApps(config, store)
+    conversation = Conversation(config, store, ollama, comfy, apps)
     reader = MemoryReader(store, ollama, conversation.turn)
-    app = create_app(config, store, conversation, comfy, Voice(config), reader=reader)
+    app = create_app(config, store, conversation, comfy, Voice(config), reader=reader, apps=apps)
     uvicorn.run(app, host="0.0.0.0", port=SociaConfig.PORT, proxy_headers=True, forwarded_allow_ips="*",
                 log_level="info")
 

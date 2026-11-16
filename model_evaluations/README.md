@@ -72,3 +72,33 @@ docker exec -e PYTHONPATH=/tmp/socia_eval/code $C python /tmp/socia_eval/run.py 
 The 0.1.1 prompt was checked this way against 0.1.0, on `qwen3:14b`: replies in Hindi to a
 Hindi message went from 0 of 3 to 3 of 3, she stopped writing code when asked for it, and
 every `create_image` call stayed right (42 of 42).
+
+## Long chats: twenty questions
+
+`games.py` plays twenty questions with her both ways, to see whether she keeps a long chat
+together: as **guesser** (the owner picked something; she must use every answer so far) and
+as **keeper** (she picks something and must answer true to it). The owner's side and the judge
+are the same model at temperature 0, told only how to play; a keeper's secret counts only if
+she wrote it down with `note` before the first question, and each answer is judged against it.
+
+```sh
+C=luna_socia-ui-1
+docker cp games.py $C:/tmp/socia_eval/
+docker exec -e PYTHONPATH=/workspace/ui $C python /tmp/socia_eval/games.py product /tmp/socia_eval/product.jsonl --games 6
+```
+
+`results/2026-11-13_twenty-questions/`, 6 games each way:
+
+| Variant | Guesser solved | Keeper wrote her secret down | Keeper answers wrong |
+| --- | --- | --- | --- |
+| Before notes (repeat penalty 1.15) | 2 / 6 | 0 / 6 (made it up as she went) | n/a |
+| Notes, reminder, penalty 1.0 | 1 / 6 | 6 / 6 | 10 / 62 |
+| **Notes, reminder, penalty 1.15 (adopted)** | 3 / 6 | 5 / 6 | 1 / 42 |
+
+**Adopted**: private notes for each chat, and a reminder to write a secret down when the owner
+asks her to pick one. Without them she has nowhere to keep a secret, so she bent every answer
+to the owner's guess. Leaving the repeat penalty out made her worse, so it stays at 1.15.
+A tool description alone, or a line in her persona alone, got no notes at all. Qwen3's
+reasoning got her secret right too, but took about 150 s a game against 8 s. Guessing is still
+weak (about half the games): the 14B model without reasoning closes in slowly.
+The judge is the same model and is sometimes wrong when she asks a question back.

@@ -368,3 +368,16 @@ button, textarea, input, select { font: inherit; color: inherit; }
   }
   .sc-editor-body { grid-template-columns: minmax(0, 1fr) 26rem; }
 }
+
+/* Luna apps: the settings menu's list, and what she did under her reply. */
+.sc-apps { display: grid; gap: 0.3rem; margin: 0; padding: 0; list-style: none; }
+.sc-app { display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.5rem; border: 1px solid var(--lv-border);
+  border-radius: 8px; color: var(--lv-muted); font-size: var(--luna-text-small); }
+.sc-app-mark { flex: none; }
+.sc-app-text { flex: 1; min-width: 0; }
+.sc-app-state { flex: none; font-size: 0.7rem; }
+.sc-app-on { color: var(--lv-text); }
+.sc-app-on .sc-app-state { color: var(--lv-accent); }
+.sc-used-apps { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.25rem; }
+.sc-used-app { padding: 0.1rem 0.5rem; border: 1px solid var(--lv-border); border-radius: 999px;
+  background: var(--lv-control); color: var(--lv-muted); font-size: 0.7rem; }

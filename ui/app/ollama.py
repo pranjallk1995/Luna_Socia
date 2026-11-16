@@ -18,6 +18,10 @@ PHOTO_PROMPT = ("Describe this photo for someone who cannot see it, in 2-4 sente
 LOOKS_PROMPT = ("Describe only the woman's lasting appearance in one or two sentences, for recognizing her: face, "
                 "hair, skin, eyes, build, age range. Not her clothes, pose or the scene. No preamble.")
 
+# The vision model is shared with Visia, Lexia, Vibia and Fiora, which all ask for it at this
+# context. Ollama reloads a model whose requested context changes, so matching it lets every
+# app share the one copy instead of each photo reloading it.
+VISION_CONTEXT_TOKENS = 16_384
 
 # Above 1 makes tokens she used in the last 256 less likely; 1.15 breaks loops without stilted wording.
 REPEAT_PENALTY = 1.15
@@ -79,7 +83,7 @@ class Ollama:
             "model": self.config.vision_model,
             "messages": [{"role": "user", "content": prompt, "images": [base64.b64encode(image).decode()]}],
             "stream": False,
-            "options": {"num_ctx": 8192, "temperature": 0.2},
+            "options": {"num_ctx": VISION_CONTEXT_TOKENS, "temperature": 0.2},
         })
         reply.raise_for_status()
         return (reply.json().get("message") or {}).get("content", "").strip()

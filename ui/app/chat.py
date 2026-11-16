@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageOps
 
+from app.apps import APP_TOOL_NAMES, APPS, LunaApps, app_tools_spec, apps_prompt
 from app.config import SociaConfig
 from app.images import ComfyUI
 from app.ollama import LOOKS_PROMPT, Ollama
@@ -29,6 +30,34 @@ PHOTO_MAX_SIDE = 2048
 WRITTEN_PICTURE = re.compile(
     r"\[\s*(?:you\s+)?(?:sends?|sent)?\s*(?:a\s+)?(?:picture|photo|selfie|image|pic)\s*:\s*([^\]]*)\]?",
     re.IGNORECASE)
+# A note she wrote out (note("the moon")) instead of calling the tool: taken out and kept as one.
+WRITTEN_NOTE = re.compile(r"\bnote\(\s*(?:text\s*=\s*)?[\"'“]?(.*?)[\"'”]?\s*\)", re.IGNORECASE)
+
+
+# Words that mean she is to pick something and keep it secret (a guessing game, a riddle, a surprise).
+SECRET_HINT = re.compile(
+    r"\b(?:20|twenty|21)\s*questions\b|\bguess(?:ing)?\b|\b(?:think|thinking) of (?:something|someone|a|an)\b|"
+    r"\b(?:pick|choose|imagine) (?:something|someone|a|an)\b|\bsecret\b|\briddle\b|\bsurprise\b|\bi spy\b|"
+    r"\bwould you rather\b|\btruth or dare\b|\bgame\b", re.IGNORECASE)
+# ...unless the owner is the one who picked it, and she is to guess.
+OWNER_PICKED = re.compile(
+    r"\bi(?:'m| am)\s+thinking\b|\bi(?:'ve| have)?\s+(?:picked|chosen|thought of|got)\b|\bi\s+(?:picked|chose)\b|"
+    r"\byou\s+(?:guess|ask)\b|\bguess what i\b", re.IGNORECASE)
+# Rounds of app use one reply may take: listing an app's tools, reading one, using it, and a retry.
+MAX_APP_ROUNDS = 5
+SECRET_NUDGE = ("[If you are the one to pick a secret here (the thing to guess, an answer), pick it now and call "
+                "note with the secret itself, such as note(\"Secret: a penguin\"), before you reply.]")
+
+
+def with_secret_nudge(messages: list[dict[str, Any]], notes: str) -> list[dict[str, Any]]:
+    """Her messages with a reminder to write a secret down, when the owner's last one starts a game
+    and she has no notes yet; a reminder in the system prompt alone she tends to pass over."""
+    if notes.strip() or not messages or messages[-1]["role"] != "user":
+        return messages
+    said = messages[-1]["content"]
+    if not SECRET_HINT.search(said) or OWNER_PICKED.search(said):
+        return messages
+    return [*messages[:-1], {**messages[-1], "content": f"{messages[-1]['content']}\n{SECRET_NUDGE}"}]
 
 
 def serialize(row: dict[str, Any]) -> dict[str, Any]:
@@ -41,6 +70,7 @@ def serialize(row: dict[str, Any]) -> dict[str, Any]:
         "image_url": f"/api/images/{row['image_id']}" if row.get("image_id") else None,
         "image_kind": row.get("image_kind"),
         "reaction": row.get("reaction"),
+        "apps": row.get("apps") or [],
         "created_at": row["created_at"].isoformat(),
     }
 
@@ -92,10 +122,13 @@ Give this chat a short name, two to five words, the way someone would label it i
 about or its mood, such as "Rainy Sunday plans" or "Missing you tonight". Answer with the name only: no quotes,
 no full stop, no emoji, no explanation."""
 NAME_WORDS = 6
-# Words that mean a picture may be on its way, in her reply or the owner's last message.
-PICTURE_HINT = re.compile(
-    r"\b(?:pic|pics|picture|pictures|photo|photos|selfie|snap|nude|nudes|naked|topless|tits|boobs?|show|send|"
-    r"resend|see|here you go|here it is|there!|take it off)\b|here you go|here it is", re.IGNORECASE)
+# Her own words saying a picture of her is sent or on its way. Only her reply is read: the owner talking
+# about photos (or sending one) is no promise, and checking on those words sent pictures nobody asked for.
+PICTURE_PROMISE = re.compile(
+    r"\b(?:here (?:it is|you go|i am)|(?:just )?sent (?:you|it)|sending (?:you|it|this|one)|resend|"
+    r"let me (?:show|send|take|snap|get)|i'?ll (?:send|show|take|snap)|"
+    r"(?:a|this|my|one|another) (?:pic|pics|picture|photo|selfie|nude|nudes)(?! of (?:her|him|them|it|your))|there!)",
+    re.IGNORECASE)
 PROMISE_PROMPT = """The end of a private chat between {name} and {her}, {name}'s girlfriend:
 
 {transcript}
@@ -156,8 +189,15 @@ def model_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def without_written_pictures(text: str) -> str:
-    """Her text without any picture she wrote out in brackets."""
-    return "\n".join(line.rstrip() for line in WRITTEN_PICTURE.sub("", text).splitlines()).strip()
+    """Her text without any picture she wrote out in brackets, or note she wrote out."""
+    text = WRITTEN_NOTE.sub("", WRITTEN_PICTURE.sub("", text))
+    return "\n".join(line.rstrip() for line in text.splitlines()).strip()
+
+
+def written_notes(text: str) -> list[dict[str, Any]]:
+    """note calls for the notes she wrote out instead of calling the tool."""
+    return [{"function": {"name": "note", "arguments": {"text": match.group(1).strip()}}}
+            for match in WRITTEN_NOTE.finditer(text) if match.group(1).strip()]
 
 
 def written_picture(text: str) -> dict[str, Any] | None:
@@ -179,11 +219,14 @@ def normalized_photo(data: bytes) -> bytes:
 
 
 class Conversation:
-    def __init__(self, config: SociaConfig, store: SociaStore, ollama: Ollama, comfy: ComfyUI) -> None:
+    def __init__(self, config: SociaConfig, store: SociaStore, ollama: Ollama, comfy: ComfyUI,
+                 apps: LunaApps | None = None) -> None:
         self.config = config
         self.store = store
         self.ollama = ollama
         self.comfy = comfy
+        # The owner's Luna apps, once connected.
+        self.apps = apps
         # One reply at a time, as in a real conversation.
         self.turn = asyncio.Lock()
 
@@ -295,21 +338,55 @@ class Conversation:
     async def answer(self, companion: dict[str, Any], chat_id: int, name: str,
                      timezone: str | None) -> AsyncIterator[dict[str, Any]]:
         rows = await asyncio.to_thread(self.store.recent, chat_id, SociaConfig.HISTORY_MESSAGES)
-        prompt = system_prompt(companion, name, self.now(timezone), await self.looks(companion["id"]))
-        messages = [{"role": "system", "content": prompt}, *model_messages(rows)]
-        text, calls = "", []
+        chat = await asyncio.to_thread(self.store.chat, chat_id)
+        notes = (chat or {}).get("notes") or ""
+        prompt = system_prompt(companion, name, self.now(timezone), await self.looks(companion["id"]), notes)
+        tools = TOOLS
+        if self.apps:
+            try:
+                running = await self.apps.running()
+            except Exception:  # noqa: BLE001 - she answers without the apps
+                logger.exception("Could not reach the Luna apps")
+                running = []
+            if running:
+                prompt += apps_prompt(running, name or "love")
+                tools = [*TOOLS, *app_tools_spec([app.key for app in running])]
+        messages = [{"role": "system", "content": prompt}, *with_secret_nudge(model_messages(rows), notes)]
+        text, calls, used_apps = "", [], []
         try:
-            async for piece in self.ollama.chat(messages, TOOLS):
-                if "text" in piece:
-                    text += piece["text"]
-                    yield {"type": "text", "text": piece["text"]}
-                calls += piece.get("tool_calls", [])
+            for _ in range(MAX_APP_ROUNDS + 1):
+                said, asked = "", []
+                async for piece in self.ollama.chat(messages, tools):
+                    if "text" in piece:
+                        said += piece["text"]
+                        yield {"type": "text", "text": piece["text"]}
+                    asked += piece.get("tool_calls", [])
+                text += said
+                app_calls = [c for c in asked if (c.get("function") or {}).get("name") in APP_TOOL_NAMES]
+                calls += [c for c in asked if c not in app_calls]
+                if not app_calls or not self.apps:
+                    break
+                # She used an app: run it, show her the answer, and let her go on.
+                results = []
+                for call in app_calls:
+                    arguments = call["function"].get("arguments") or {}
+                    if isinstance(arguments, str):
+                        arguments = json.loads(arguments or "{}")
+                    app = APPS.get(str(arguments.get("app", "")).lower().removeprefix("luna ").strip())
+                    yield {"type": "status", "text": f"Using {app.name if app else 'an app'}"}
+                    results.append({"role": "tool", "content": await self.apps.handle(call["function"]["name"], arguments)})
+                    used = {"app": app.key, "tool": str(arguments.get("tool") or "")} if app else None
+                    if used and call["function"]["name"] == "use_app" and used not in used_apps:
+                        # Shown under her reply, so the owner sees what she did.
+                        used_apps.append(used)
+                messages = [*messages, {"role": "assistant", "content": said, "tool_calls": app_calls}, *results]
         except Exception as error:  # noqa: BLE001 - shown in the chat
             logger.exception("Chat model failed")
             yield {"type": "error", "text": f"{companion['name']} could not answer: {error}"}
             return
 
         image_id = None
+        noted = await self.write_notes(chat_id, [*calls, *written_notes(text)])
         reaction = await self.react(calls, rows)
         if reaction:
             yield {"type": "reaction", **reaction}
@@ -317,7 +394,7 @@ class Conversation:
         if call is None:
             call = written_picture(text)
         text = without_written_pictures(text)
-        if call is None and rows and PICTURE_HINT.search(f"{rows[-1]['content'] or ''}\n{text}"):
+        if call is None and rows and not rows[-1].get("image_id") and PICTURE_PROMISE.search(text):
             # She said a picture is coming but did not take it: ask what she meant to send, and take that.
             call = await self.promised_picture(companion["name"], name, rows, text)
         if call:
@@ -331,9 +408,12 @@ class Conversation:
             except Exception as error:  # noqa: BLE001 - shown in the chat
                 logger.exception("Image failed")
                 yield {"type": "error", "text": f"The picture did not come out: {error}"}
-        if not text.strip() and (call or reaction):
-            # She only sent a picture or a reaction; let her say something with it.
+        if not text.strip() and (call or reaction or noted):
+            # She only sent a picture, a reaction or a note; let her say something with it.
             used, results = [], []
+            for note in noted:
+                used.append({"function": {"name": "note", "arguments": {"text": note}}})
+                results.append({"role": "tool", "content": "Noted. Only you can see it."})
             if reaction:
                 used.append({"function": {"name": "react", "arguments": {"emoji": reaction["reaction"]}}})
                 results.append({"role": "tool", "content": "Your reaction is on their message."})
@@ -349,8 +429,26 @@ class Conversation:
             except Exception:  # noqa: BLE001 - the picture or reaction alone is enough
                 logger.exception("Caption failed")
 
-        saved = await asyncio.to_thread(self.store.add_message, chat_id, "luna", text.strip(), image_id)
+        saved = await asyncio.to_thread(self.store.add_message, chat_id, "luna", text.strip(), image_id, None, used_apps)
         yield {"type": "done", "message": serialize(saved)}
+
+    async def write_notes(self, chat_id: int, calls: list[dict[str, Any]]) -> list[str]:
+        """What she wrote down with note, added to the chat's private notes."""
+        noted = []
+        for call in calls:
+            if (call.get("function") or {}).get("name") != "note":
+                continue
+            arguments = call["function"].get("arguments") or {}
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments or "{}")
+                except json.JSONDecodeError:
+                    continue
+            note = " ".join(str(arguments.get("text") or "").split())[:SociaConfig.NOTE_CHARS]
+            if note:
+                await asyncio.to_thread(self.store.add_note, chat_id, note, SociaConfig.NOTES_CHARS)
+                noted.append(note)
+        return noted
 
     async def react(self, calls: list[dict[str, Any]], rows: list[dict[str, Any]]) -> dict[str, Any] | None:
         """Her reaction on the owner's last message, if she called react with one she has; else None."""

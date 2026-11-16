@@ -19,7 +19,7 @@ for the owner only. Its models run in Luna Sentia, which every Luna app shares.
 | Part | Model | Where it runs | Before changing it |
 | --- | --- | --- | --- |
 | Chat | `LUNASOCIA_CHAT_MODEL` (default `huihui_ai/qwen3-abliterated:14b`, an uncensored Qwen3 14B, about 9.4 GB with 8k context) | Sentia's Ollama, through its monitor, on the GPU | Compare it with [`model_evaluations/`](model_evaluations/README.md) and check it fits with Sentia's `model_checks/check_model.py --context 8192` |
-| Photos sent to Luna | `LUNASOCIA_VISION_MODEL` (default `qwen3-vl:8b-instruct`) describes them for her | Sentia's Ollama, on the GPU | Sentia's `model_checks/check_model.py`, then a few photos by hand |
+| Photos sent to Luna | `LUNASOCIA_VISION_MODEL` (default `qwen3-vl:8b-instruct`) describes them for her, at 16k context like Visia, Lexia, Vibia and Fiora, so they share one loaded copy | Sentia's Ollama, on the GPU | Sentia's `model_checks/check_model.py`, then a few photos by hand |
 | Pictures of Luna | Qwen-Image 2.1 Turbo, 8 steps; her profile picture and up to 4 other pictures of her are the face references | Sentia's ComfyUI, on the GPU | A few pictures by hand |
 | Voice messages | faster-whisper `LUNASOCIA_STT_MODEL` (default `large-v3-turbo`, int8) | Here, on the CPU | A few voice messages by hand |
 | Her voice | Kokoro 82M, in the voice chosen for her (16 female English and Hindi voices; `LUNASOCIA_TTS_VOICE`, default `af_heart`, for new girlfriends) | Here, on the CPU | Listen to a few replies |
@@ -29,10 +29,12 @@ for the owner only. Its models run in Luna Sentia, which every Luna app shares.
 
 ![Luna ecosystem architecture](docs/luna-ecosystem.svg)
 
-Socia is one service, with no MCP server, on Luna Sentia's `luna_sentia_network`. It signs
-in through Sentia's `auth`, keeps its messages in Sentia's PostgreSQL (`lunasocia`), sends
-chat and photo calls through Sentia's model monitor to Ollama, and asks Sentia's ComfyUI for
-pictures. It is not on Luna Unia's home page yet.
+Socia is one service, with no MCP server of its own, on Luna Sentia's `luna_sentia_network`.
+It signs in through Sentia's `auth`, keeps its messages in Sentia's PostgreSQL (`lunasocia`),
+sends chat and photo calls through Sentia's model monitor to Ollama, and asks Sentia's
+ComfyUI for pictures. Once you connect them, it is also an MCP client of every Luna app and
+of Sentia (the green line): see [Her phone: your Luna apps](#her-phone-your-luna-apps). Luna
+Unia shows it to the owner only.
 
 ## Girlfriends
 
@@ -74,9 +76,39 @@ her chats move to her, and her files to `/data/companions/<id>`.
    2.1 workflow (`ui/app/images.py`) with her profile picture, her other pictures and, if asked, your last photo
    as references, then has ComfyUI free its model again.
 
+4. When you ask for something one of your Luna apps does, she uses it first: see below.
+
 Measured on an RTX 5070 (12 GB): a reply starts in about 0.3 s once the chat model is
 loaded (about 25 s to load it); a picture takes about 40 s; her voice about 0.4 s per
 reply; a 4-second voice message about 4 s to transcribe.
+
+## Her phone: your Luna apps
+
+Luna can use your other Luna apps for you: play a song on the speakers (Vibia), dim the
+lights (Lumia), find a photo (Visia), tell you what you ate (Vita) or spent (Fiora), look
+up a document (Lexia), or say how busy the GPU is (Sentia). Choose **Connect Luna apps** on
+the home page, or in a chat's settings menu, and allow Luna Socia on Sentia's sign-in page,
+once. The home page's button then shows how many apps are running, and the settings menu
+lists every app as running, not running or not connected; disconnect from either. Each
+reply in which she used an app shows which, under it, such as "🎵 Luna Vibia · play_tracks",
+kept with the message (`messages.apps`).
+
+- **How it signs in.** Socia registers itself with Sentia's `auth` as an OAuth client and
+  asks for one token that names no particular app, so every Luna MCP server accepts it, as
+  the owner, like a connector in Claude. The sign-in uses PKCE. Access tokens last an hour,
+  and Socia refreshes them itself; each refresh token works once. They are kept in the
+  `apps_connection` table. If Sentia stops accepting them, Socia disconnects until you
+  connect again.
+- **How she uses them.** Her context is 8k tokens, too small for every app's tools, so she
+  gets three: `app_tools` lists what one app can do, `app_tool_help` shows a tool's
+  arguments, and `use_app` runs it. Her prompt names the apps that answer now, with one
+  line each. She may take up to five rounds of these before she replies, and the page
+  shows "using Luna Vibia…" meanwhile. Each answer she reads is cut to 2,400 characters.
+- **Where.** Socia calls each server on `luna_sentia_network` (`ui/app/apps.py`): Fiora,
+  Lexia, Lumia, Vibia, Visia and Vita at `luna-<app>-mcp:8000/mcp`, and Sentia's at
+  `luna-sentia-monitor:8001/mcp`. An app that is not running is left out.
+- She acts as you, with everything your connectors can do, including deleting. She uses an
+  app only when you ask for something it does.
 
 ## Start
 
@@ -118,7 +150,7 @@ voice models, downloaded the first time they are used (`/data/models`).
 
 The database keeps each girlfriend (`companions`: persona, voice, memory), her chats (`chats`,
 with their `messages` and `images`), and the conversations imported into her memory
-(`memory_sources`). Every chat is kept, so her long-term memory can draw on all of them. On a
+(`memory_sources`), and its sign-in to your Luna apps (`apps_connection`). Every chat is kept, so her long-term memory can draw on all of them. On a
 desktop, her chats are listed beside the conversation, and on a wide screen her profile is on
 the other side; on a phone, open the list from the menu button at the top left. Start a new
 chat with the pencil, and rename or delete a chat from the list. Deleting a chat removes its

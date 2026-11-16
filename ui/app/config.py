@@ -40,6 +40,9 @@ class SociaConfig:
     # What she remembers about the owner goes into every reply, so it stays short:
     # about 1,200 tokens of the 8k context.
     MEMORY_CHARS: ClassVar[int] = 4800
+    # Her private notes for one chat: a line is at most NOTE_CHARS, and the oldest lines go past NOTES_CHARS.
+    NOTE_CHARS: ClassVar[int] = 300
+    NOTES_CHARS: ClassVar[int] = 1500
     # The owner's own words from one imported chat that the model reads for facts.
     MEMORY_READ_CHARS: ClassVar[int] = 6000
 

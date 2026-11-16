@@ -13,7 +13,8 @@ import httpx
 from PIL import Image
 from starlette.testclient import TestClient
 
-from app.chat import clean_name, Conversation, model_messages, without_written_pictures, written_picture
+from app.chat import (PICTURE_PROMISE, clean_name, Conversation, model_messages, with_secret_nudge, without_written_pictures,
+                      written_notes, written_picture)
 from app.memory import ExportError, MemoryReader, fact_lines, parse_export, their_words
 from app.config import SociaConfig
 from app.images import ComfyUI, workflow
@@ -46,6 +47,18 @@ class MemoryStore:
         self.chats_: list[dict] = []
         self.images: list[dict] = []
         self.messages: list[dict] = []
+        self.apps: dict | None = None
+
+    def apps_connection(self):
+        return dict(self.apps) if self.apps else None
+
+    def set_apps_client(self, client_id, client_secret, redirect_uri):
+        self.apps = {"client_id": client_id, "client_secret": client_secret, "redirect_uri": redirect_uri,
+                     "access_token": None, "refresh_token": None, "access_expires": None}
+        return dict(self.apps)
+
+    def set_apps_tokens(self, access, refresh, expires):
+        self.apps.update(access_token=access, refresh_token=refresh, access_expires=expires)
 
     def create_companion(self, name, persona, voice):
         row = {"id": len(self.companions_) + 1, "name": name, "persona": persona, "voice": voice, "memory": "",
@@ -119,7 +132,7 @@ class MemoryStore:
         return before - len(self.sources)
 
     def create_chat(self, companion_id, title=""):
-        chat = {"id": len(self.chats_) + 1, "companion_id": companion_id, "title": title, "named": "",
+        chat = {"id": len(self.chats_) + 1, "companion_id": companion_id, "title": title, "named": "", "notes": "",
                 "created_at": NOW, "updated_at": NOW}
         self.chats_.append(chat)
         return dict(chat)
@@ -158,6 +171,14 @@ class MemoryStore:
     def opening(self, chat_id, count=6):
         return [m for m in self.messages if m["chat_id"] == chat_id][:count]
 
+    def add_note(self, chat_id, note, limit):
+        chat = next(c for c in self.chats_ if c["id"] == chat_id)
+        lines = [*chat["notes"].splitlines(), note]
+        while len(lines) > 1 and len("\n".join(lines)) > limit:
+            lines.pop(0)
+        chat["notes"] = "\n".join(lines)
+        return chat["notes"]
+
     def title_chat(self, chat_id, title):
         chat = next(c for c in self.chats_ if c["id"] == chat_id)
         chat["title"] = chat["title"] or title
@@ -179,10 +200,10 @@ class MemoryStore:
     def image(self, image_id):
         return next((i for i in self.images if i["id"] == image_id), None)
 
-    def add_message(self, chat_id, role, content, image_id=None, photo_note=None):
+    def add_message(self, chat_id, role, content, image_id=None, photo_note=None, apps=None):
         image = self.image(image_id) if image_id else None
         row = {"id": len(self.messages) + 1, "chat_id": chat_id, "role": role, "content": content,
-               "image_id": image_id, "photo_note": photo_note, "reaction": None, "created_at": NOW,
+               "image_id": image_id, "photo_note": photo_note, "reaction": None, "apps": apps or None, "created_at": NOW,
                "image_kind": image and image["kind"], "image_prompt": image and image["prompt"]}
         self.messages.append(row)
         return row
@@ -388,11 +409,11 @@ class ConversationTests(unittest.TestCase):
     def tearDown(self):
         self.folder.cleanup()
 
-    def run_turn(self, rounds, text="", photo=None, chat_id=None, her=None, completion=None):
+    def run_turn(self, rounds, text="", photo=None, chat_id=None, her=None, completion=None, apps=None):
         seen: dict = {"name": completion} if completion else {}
         ollama_transport, comfy_transport = fake_services(rounds, seen)
         conversation = Conversation(self.config, self.store, Ollama(self.config, ollama_transport),
-                                    ComfyUI(self.config, comfy_transport))
+                                    ComfyUI(self.config, comfy_transport), apps)
 
         async def collect():
             companion = self.store.companion((her or self.her)["id"])
@@ -411,12 +432,58 @@ class ConversationTests(unittest.TestCase):
         self.assertIn("image", [event["type"] for event in events])
         self.assertIn("graph", seen)
 
+    def test_only_her_own_promises_of_a_picture_count(self):
+        # Her replies on 16 November that got a picture nobody asked for, and ones that promised one.
+        for reply in ["Aww, Melon! That's such a cute photo 😊", "I'm ready when you are! Bring it on! 🥰",
+                      "You've been busy taking pictures of them all day, haven't you?",
+                      "Oh no—this one looks like Melon!"]:
+            self.assertIsNone(PICTURE_PROMISE.search(reply), reply)
+        for reply in ["Here it is—my titties, just for you!", "Okay… let me get that for you. ❤️", "There! 😘",
+                      "Let me resend it right away", "Here you go—just for you. 💞", "I just sent you my titties"]:
+            self.assertIsNotNone(PICTURE_PROMISE.search(reply), reply)
+
     def test_no_picture_when_she_promises_none_or_nothing_hints_at_one(self):
         events, seen = self.run_turn([[{"content": "Not now, later 😘"}]], text="send me one", completion="NONE")
         self.assertNotIn("image", [event["type"] for event in events])
         self.assertNotIn("graph", seen)
         events, seen = self.run_turn([[{"content": "Coffee then? ❤️"}]], text="It's raining")
         self.assertFalse(any("Does Luna's last message" in c["messages"][0]["content"] for c in seen.get("completions", [])))
+
+    def test_she_uses_a_luna_app_and_answers_from_what_it_said(self):
+        from app.apps import APPS
+
+        class Apps:
+            used = []
+
+            async def running(self):
+                return [APPS["vibia"], APPS["lumia"]]
+
+            async def handle(self, name, arguments):
+                self.used.append((name, arguments))
+                return "Playing Kesariya on the speakers." if name == "use_app" else "- play_tracks: Play tracks."
+
+        listing = {"function": {"name": "app_tools", "arguments": {"app": "vibia"}}}
+        play = {"function": {"name": "use_app", "arguments": json.dumps(
+            {"app": "vibia", "tool": "play_tracks", "arguments": {"names": ["Kesariya.mp3"]}})}}
+        apps = Apps()
+        events, seen = self.run_turn([[{"content": "", "tool_calls": [listing]}], [{"content": "", "tool_calls": [play]}],
+                                      [{"content": "Done, it's playing ❤️"}]], text="play kesariya", apps=apps)
+        self.assertEqual([name for name, _ in apps.used], ["app_tools", "use_app"])
+        self.assertEqual(apps.used[1][1]["arguments"], {"names": ["Kesariya.mp3"]})
+        self.assertIn({"type": "status", "text": "Using Luna Vibia"}, events)
+        self.assertEqual(events[-2]["message"]["content"], "Done, it's playing ❤️")
+        # Saved with her reply, so the page shows what she did; listing tools is not shown.
+        self.assertEqual(events[-2]["message"]["apps"], [{"app": "vibia", "tool": "play_tracks"}])
+        first, _, last = streamed(seen)
+        self.assertIn("- vibia: their music", first["messages"][0]["content"])
+        self.assertEqual({tool["function"]["name"] for tool in first["tools"]} & {"app_tools", "use_app"},
+                         {"app_tools", "use_app"})
+        self.assertEqual(last["messages"][-1], {"role": "tool", "content": "Playing Kesariya on the speakers."})
+
+    def test_without_the_apps_she_has_no_app_tools(self):
+        _, seen = self.run_turn([[{"content": "Hi ❤️"}]], text="hi")
+        self.assertNotIn("app_tools", {tool["function"]["name"] for tool in streamed(seen)[0]["tools"]})
+        self.assertNotIn("Luna apps", streamed(seen)[0]["messages"][0]["content"])
 
     def test_a_text_reply_streams_and_is_stored(self):
         events, seen = self.run_turn([[{"content": "Rain again? 😂"}, {"content": " Coffee then? ❤️"}]], text="It's raining")
@@ -452,6 +519,26 @@ class ConversationTests(unittest.TestCase):
         events, _ = self.run_turn([[{"content": "hmm", "tool_calls": [odd]}]], text="guess what")
         self.assertNotIn("reaction", [e["type"] for e in events])
 
+    def test_she_writes_down_her_secret_and_reads_it_on_every_reply(self):
+        note = {"function": {"name": "note", "arguments": {"text": "Secret: a penguin"}}}
+        events, seen = self.run_turn([[{"content": "", "tool_calls": [note]}], [{"content": "Got one! Ask away 😘"}]],
+                                     text="Let's play 20 questions, you think of something")
+        chat_id = events[0]["chat"]["id"]
+        self.assertEqual(self.store.chat(chat_id)["notes"], "Secret: a penguin")
+        self.assertEqual(events[-2]["message"]["content"], "Got one! Ask away 😘")
+        # Asked to pick a secret, she was reminded to write it down; the next reply reads it.
+        self.assertIn("call note", streamed(seen)[0]["messages"][-1]["content"])
+        events, seen = self.run_turn([[{"content": "Nope! 🙈"}]], text="Is it a cat?", chat_id=chat_id)
+        system = streamed(seen)[0]["messages"][0]["content"]
+        self.assertIn("Your private notes for this chat", system)
+        self.assertIn("- Secret: a penguin", system)
+
+    def test_a_note_she_writes_out_is_kept_and_never_shown(self):
+        events, _ = self.run_turn([[{"content": 'Ready! note("Secret: the moon") Ask me 😘'}]],
+                                  text="your turn to think of something, I'll ask")
+        self.assertEqual(self.store.chat(events[0]["chat"]["id"])["notes"], "Secret: the moon")
+        self.assertEqual(events[-2]["message"]["content"], "Ready!  Ask me 😘")
+
     def test_she_sees_a_photo_and_steps_into_it(self):
         call = {"function": {"name": "create_image", "arguments": {
             "description": "standing beside them, smiling", "include_luna": True, "use_their_photo": True}}}
@@ -461,6 +548,9 @@ class ConversationTests(unittest.TestCase):
                          ["chat", "user", "status", "image_started", "image", "text", "done", "chat"])
         # The vision model's description reached the chat model.
         self.assertIn("[Photo: A red square.]", streamed(seen)[0]["messages"][-1]["content"])
+        # At the context Visia, Lexia, Vibia and Fiora ask for, so Ollama keeps the one copy loaded.
+        looks = [c for c in seen["completions"] if c["model"] == self.config.vision_model]
+        self.assertEqual({c["options"]["num_ctx"] for c in looks}, {16_384})
         # She knows her own looks, read once from her profile picture.
         self.assertIn("A photo of a woman who looks like this is you.", streamed(seen)[0]["messages"][0]["content"])
         self.assertEqual(self.profile.with_suffix(".txt").read_text(), "A red square.")
@@ -571,6 +661,11 @@ class GateTests(unittest.TestCase):
         client = self.client({"user_id": "owner", "name": "Pranjall Kumar"}, cfg, reader)
         client.cookies.set("luna_sso", "token")
         return client
+
+    def test_only_the_owner_sees_or_connects_the_luna_apps(self):
+        self.assertEqual(self.client(None).get("/api/apps").status_code, 401)
+        self.assertEqual(self.client(None).get("/apps/connect").status_code, 303)  # to sign in
+        self.assertEqual(self.owner().get("/api/apps").json(), {"connected": False, "apps": []})
 
     def test_strangers_are_sent_to_sign_in_and_others_refused(self):
         client = self.client(None)
@@ -1029,6 +1124,106 @@ class MessageDeleteTests(unittest.TestCase):
         self.assertIsNotNone(self.store.message(sent["id"]))
 
 
+class LunaAppsTests(unittest.TestCase):
+    """Socia's sign-in to the owner's Luna apps, as an OAuth client of Luna Sentia's sign-on."""
+
+    def setUp(self):
+        self.seen = []
+        self.refuse = False
+
+        def auth(request: httpx.Request) -> httpx.Response:
+            self.seen.append(request)
+            if request.url.path == "/oauth/register":
+                return httpx.Response(201, json={"client_id": "socia", "client_secret": "s3cret"})
+            if request.url.path == "/oauth/token":
+                if self.refuse:
+                    return httpx.Response(400, json={"error": "invalid_grant"})
+                n = len([r for r in self.seen if r.url.path == "/oauth/token"])
+                return httpx.Response(200, json={"access_token": f"access{n}", "refresh_token": f"refresh{n}",
+                                                 "expires_in": 3600})
+            return httpx.Response(404)
+
+        from app.apps import LunaApps
+        self.store = MemoryStore()
+        self.apps = LunaApps(config(), self.store, httpx.MockTransport(auth))
+
+    def test_the_owner_approves_socia_with_pkce_once_for_every_app(self):
+        import base64
+        import hashlib
+        from urllib.parse import parse_qs, urlparse
+
+        url = asyncio.run(self.apps.start())
+        query = parse_qs(urlparse(url).query)
+        self.assertTrue(url.startswith("https://auth.example.com/oauth/authorize?"))
+        self.assertEqual(query["code_challenge_method"], ["S256"])
+        self.assertEqual(query["redirect_uri"], ["https://socia.example.com/apps/callback"])
+        self.assertNotIn("resource", query)  # one token for every Luna app
+        asyncio.run(self.apps.finish("code1", query["state"][0]))
+        exchange = parse_qs(self.seen[-1].content.decode())
+        verifier = exchange["code_verifier"][0]
+        digest = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+        self.assertEqual(digest, query["code_challenge"][0])
+        self.assertEqual(exchange["client_secret"], ["s3cret"])
+        self.assertTrue(asyncio.run(self.apps.connected()))
+        self.assertEqual(asyncio.run(self.apps.access_token()), "access1")
+        with self.assertRaises(ValueError):
+            asyncio.run(self.apps.finish("code1", query["state"][0]))  # each approval works once
+
+    def test_an_expiring_token_is_refreshed_and_a_refused_refresh_disconnects(self):
+        from app.apps import NotConnected
+
+        self.store.set_apps_client("socia", "s3cret", self.apps.redirect_uri)
+        self.store.set_apps_tokens("old", "refresh0", 0)
+        self.assertEqual(asyncio.run(self.apps.access_token()), "access1")
+        self.assertEqual(self.store.apps["refresh_token"], "refresh1")
+        self.store.set_apps_tokens("old", "refresh1", 0)
+        self.refuse = True
+        with self.assertRaises(NotConnected):
+            asyncio.run(self.apps.access_token())
+        self.assertFalse(asyncio.run(self.apps.connected()))
+
+    def test_her_tool_calls_name_real_apps_and_tools(self):
+        from types import SimpleNamespace
+
+        tool = SimpleNamespace(name="play_tracks", description="Play tracks on the speakers. Owner only.",
+                               inputSchema={"type": "object", "properties": {"names": {"type": "array"}}})
+
+        async def tools(key):
+            return [tool]
+
+        self.apps.tools = tools
+        handle = lambda name, arguments: asyncio.run(self.apps.handle(name, arguments))
+        self.assertIn("no Luna app called", handle("app_tools", {"app": "spotify"}))
+        self.assertEqual(handle("app_tools", {"app": "Luna Vibia"}), "Luna Vibia can:\n- play_tracks: Play tracks on the speakers.")
+        self.assertIn('"names"', handle("app_tool_help", {"app": "vibia", "tool": "play_tracks"}))
+        self.assertIn("has no tool", handle("use_app", {"app": "vibia", "tool": "dance", "arguments": {}}))
+
+    def test_the_page_sees_every_app_and_which_answer(self):
+        from app.apps import APPS
+
+        async def running():
+            return [APPS["vibia"]]
+
+        self.apps.running = running
+        self.assertEqual(asyncio.run(self.apps.status())["connected"], False)
+        self.store.set_apps_client("socia", "s3cret", self.apps.redirect_uri)
+        self.store.set_apps_tokens("a", "r", 9e9)
+        status = asyncio.run(self.apps.status())
+        self.assertTrue(status["connected"])
+        self.assertEqual(len(status["apps"]), 7)
+        self.assertEqual([app["key"] for app in status["apps"] if app["running"]], ["vibia"])
+
+    def test_a_long_answer_is_shortened_for_her(self):
+        from types import SimpleNamespace
+
+        from app.apps import RESULT_CHARS, result_text
+
+        long = SimpleNamespace(structuredContent=None, isError=False, content=[SimpleNamespace(type="text", text="x" * 5000)])
+        self.assertEqual(len(result_text(long)), RESULT_CHARS)
+        failed = SimpleNamespace(structuredContent={"error": "no"}, isError=True, content=[])
+        self.assertTrue(result_text(failed).startswith("The app answered with an error"))
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -1039,6 +1234,26 @@ class LoopAndLanguageTests(unittest.TestCase):
                 {"role": "user", "content": "me too"}]
         self.assertEqual(model_messages(rows)[-1]["content"],
                          '[Reacted ❤️ to your message: "Missed you all day"]\nme too')
+
+    def test_she_is_reminded_to_note_a_secret_only_when_she_picks_one(self):
+        def nudged(text, notes=""):
+            return "call note" in with_secret_nudge([{"role": "user", "content": text}], notes)[-1]["content"]
+        self.assertTrue(nudged("Let's play 20 questions! You think of something"))
+        self.assertTrue(nudged("pick an animal and I'll guess"))
+        self.assertFalse(nudged("I'm thinking of something, you ask me questions"))
+        self.assertFalse(nudged("Let's play a guessing game", notes="Secret: a penguin"))
+        self.assertFalse(nudged("It's raining again"))
+        self.assertEqual(written_notes('ok note(text="a guitar")')[0]["function"]["arguments"], {"text": "a guitar"})
+        self.assertEqual(without_written_pictures('Ready! note("the moon") 😘'), "Ready!  😘")
+
+    def test_her_notes_keep_their_newest_lines(self):
+        store = MemoryStore()
+        chat = store.create_chat(store.create_companion("Luna", {}, "af_heart")["id"])
+        for n in range(5):
+            store.add_note(chat["id"], f"note {n} " + "x" * 20, 60)
+        self.assertEqual(store.chat(chat["id"])["notes"].splitlines()[0][:6], "note 3")
+        prompt = system_prompt({"name": "Luna", "persona": dict(DEFAULT_PERSONA)}, "Pranjall", NOW, notes="Secret: a penguin")
+        self.assertTrue(prompt.endswith("- Secret: a penguin"))
 
     def test_she_knows_how_to_react(self):
         prompt = system_prompt({"name": "Luna", "persona": dict(DEFAULT_PERSONA)}, "Pranjall", NOW)

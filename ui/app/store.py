@@ -109,9 +109,25 @@ CREATE TABLE IF NOT EXISTS memory_sources (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (companion_id, source, external_id)
 );
+-- What she wrote down to remember in a chat (a secret she picked for a game, the score, a plan); only she reads it.
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS notes TEXT NOT NULL DEFAULT '';
 -- An emoji the other one put on this message: the owner on hers, she on the owner's.
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS reaction TEXT;
 CREATE INDEX IF NOT EXISTS memory_sources_unread ON memory_sources (companion_id, id) WHERE facts IS NULL;
+-- The Luna apps she used for a reply: [{"app": "vibia", "tool": "play_tracks"}, ...].
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS apps JSONB;
+-- Socia's sign-in to the owner's Luna apps: its OAuth client at Sentia's sign-on and the
+-- tokens the owner approved. One row; no refresh token means not connected.
+CREATE TABLE IF NOT EXISTS apps_connection (
+    singleton BOOLEAN PRIMARY KEY DEFAULT true CHECK (singleton),
+    client_id TEXT NOT NULL,
+    client_secret TEXT,
+    redirect_uri TEXT NOT NULL,
+    access_token TEXT,
+    refresh_token TEXT,
+    access_expires DOUBLE PRECISION,
+    connected_at TIMESTAMPTZ
+);
 """
 
 COMPANION_COLUMNS = """c.*, stats.chats, stats.last_active, mem.sources, mem.read"""
@@ -121,7 +137,7 @@ LEFT JOIN LATERAL (SELECT count(*) AS chats, max(updated_at) AS last_active FROM
 LEFT JOIN LATERAL (SELECT count(*) AS sources, count(facts) AS read FROM memory_sources
                    WHERE companion_id = c.id) mem ON true"""
 
-MESSAGE_COLUMNS = """m.id, m.chat_id, m.role, m.content, m.image_id, m.photo_note, m.reaction, m.created_at,
+MESSAGE_COLUMNS = """m.id, m.chat_id, m.role, m.content, m.image_id, m.photo_note, m.reaction, m.apps, m.created_at,
                      i.kind AS image_kind, i.prompt AS image_prompt"""
 
 
@@ -271,6 +287,17 @@ class SociaStore:
             return db.execute("SELECT role, content, image_id FROM messages WHERE chat_id = %s ORDER BY id LIMIT %s",
                               (chat_id, count)).fetchall()
 
+    def add_note(self, chat_id: int, note: str, limit: int) -> str:
+        """Add a line to her notes for a chat, keeping the last ``limit`` characters' worth of lines; her notes."""
+        with self.connect() as db:
+            row = db.execute("SELECT notes FROM chats WHERE id = %s FOR UPDATE", (chat_id,)).fetchone()
+            lines = [*(row["notes"].splitlines() if row else []), note]
+            while len(lines) > 1 and len("\n".join(lines)) > limit:
+                lines.pop(0)
+            notes = "\n".join(lines)
+            db.execute("UPDATE chats SET notes = %s WHERE id = %s", (notes, chat_id))
+        return notes
+
     def title_chat(self, chat_id: int, title: str) -> None:
         """Name a chat after its first message, unless it has a name already."""
         with self.connect() as db:
@@ -300,11 +327,11 @@ class SociaStore:
                               "WHERE i.id = %s", (image_id,)).fetchone()
 
     def add_message(self, chat_id: int, role: str, content: str, image_id: int | None = None,
-                    photo_note: str | None = None) -> dict[str, Any]:
+                    photo_note: str | None = None, apps: list[dict[str, str]] | None = None) -> dict[str, Any]:
         with self.connect() as db:
             row = db.execute(
-                "INSERT INTO messages (chat_id, role, content, image_id, photo_note) VALUES (%s, %s, %s, %s, %s) "
-                "RETURNING id", (chat_id, role, content, image_id, photo_note)).fetchone()
+                "INSERT INTO messages (chat_id, role, content, image_id, photo_note, apps) VALUES (%s, %s, %s, %s, %s, %s) "
+                "RETURNING id", (chat_id, role, content, image_id, photo_note, Jsonb(apps) if apps else None)).fetchone()
             db.execute("UPDATE chats SET updated_at = now() WHERE id = %s", (chat_id,))
             return db.execute(f"SELECT {MESSAGE_COLUMNS} FROM messages m LEFT JOIN images i ON i.id = m.image_id "
                               "WHERE m.id = %s", (row["id"],)).fetchone()
@@ -357,3 +384,25 @@ class SociaStore:
         with self.connect() as db:
             return db.execute("SELECT * FROM images WHERE chat_id = %s AND kind = 'photo' ORDER BY id DESC LIMIT 1",
                               (chat_id,)).fetchone()
+
+    # The Luna apps
+
+    def apps_connection(self) -> dict[str, Any] | None:
+        with self.connect() as db:
+            return db.execute("SELECT * FROM apps_connection").fetchone()
+
+    def set_apps_client(self, client_id: str, client_secret: str | None, redirect_uri: str) -> dict[str, Any]:
+        """A newly registered client; tokens of an earlier one no longer work with it."""
+        with self.connect() as db:
+            return db.execute(
+                """INSERT INTO apps_connection (client_id, client_secret, redirect_uri) VALUES (%s, %s, %s)
+                   ON CONFLICT (singleton) DO UPDATE SET client_id = EXCLUDED.client_id,
+                     client_secret = EXCLUDED.client_secret, redirect_uri = EXCLUDED.redirect_uri,
+                     access_token = NULL, refresh_token = NULL, access_expires = NULL, connected_at = NULL
+                   RETURNING *""", (client_id, client_secret, redirect_uri)).fetchone()
+
+    def set_apps_tokens(self, access: str | None, refresh: str | None, expires: float | None) -> None:
+        with self.connect() as db:
+            db.execute("""UPDATE apps_connection SET access_token = %s, refresh_token = %s, access_expires = %s,
+                          connected_at = CASE WHEN %s::text IS NULL THEN NULL ELSE coalesce(connected_at, now()) END""",
+                       (access, refresh, expires, refresh))

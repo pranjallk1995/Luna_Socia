@@ -606,9 +606,28 @@ function messageElement(message) {
       react(message.id, element.dataset.reaction === REACTIONS()[0] ? null : REACTIONS()[0]);
     });
   }
+  if (message.apps?.length) element.append(usedApps(message.apps));
   element.append(meta(message));
   showReaction(element, message.reaction);
   return element;
+}
+
+// Each Luna app's mark, for her replies and the settings list.
+const APP_MARKS = { fiora: "💰", lexia: "📄", lumia: "💡", vibia: "🎵", visia: "🖼️", vita: "🥗", sentia: "🖥️" };
+const APP_NAMES = { fiora: "Luna Fiora", lexia: "Luna Lexia", lumia: "Luna Lumia", vibia: "Luna Vibia",
+                    visia: "Luna Visia", vita: "Luna Vita", sentia: "Luna Sentia" };
+
+// What she did in your Luna apps for this reply.
+function usedApps(apps) {
+  const list = document.createElement("div");
+  list.className = "sc-used-apps";
+  for (const use of apps) {
+    const item = document.createElement("span");
+    item.className = "sc-used-app";
+    item.textContent = `${APP_MARKS[use.app] || "📱"} ${APP_NAMES[use.app] || use.app}${use.tool ? ` · ${use.tool}` : ""}`;
+    list.append(item);
+  }
+  return list;
 }
 
 // Reactions: the emoji either of them can put on the other's message.
@@ -1276,7 +1295,7 @@ function wire() {
   });
 
   const menu = $("menu");
-  const openMenu = () => { loadStatus(); loadReferences(); menu.showModal(); };
+  const openMenu = () => { loadStatus(); loadReferences(); showApps(); menu.showModal(); };
   $("references-file").addEventListener("change", async () => {
     const files = [...$("references-file").files];
     if (!files.length) return;
@@ -1334,5 +1353,52 @@ function wire() {
   window.addEventListener("hashchange", () => { state.companions = []; route(); });
 }
 
+/* Her phone: the owner's Luna apps, which she can use once they are connected. */
+
+async function showApps() {
+  const button = $("apps");
+  const list = $("apps-list");
+  if (!list.children.length) list.replaceChildren(element("li", { className: "sc-muted", textContent: "Checking…" }));
+  let status;
+  try { status = await json("/api/apps"); } catch { return; }
+  const running = status.apps.filter((app) => app.running);
+  // The home page's button.
+  button.textContent = status.connected ? `Luna apps: ${running.length} running` : "Connect Luna apps";
+  button.title = status.connected
+    ? `She can use ${running.map((app) => app.name.replace("Luna ", "")).join(", ") || "none of them right now"}. Select to disconnect.`
+    : "Let her use your Luna apps: music, lights, photos, meals, money, documents";
+  button.dataset.connected = status.connected ? "yes" : "";
+  button.hidden = false;
+  // The settings menu's list: every app, and whether she can use it now.
+  $("apps-note").textContent = status.connected
+    ? "She can use the running ones for you, as you, when you ask."
+    : "Not connected: connect them, then allow Luna Socia on Luna Sentia's sign-in page, once.";
+  list.replaceChildren(...status.apps.map((app) => {
+    const item = element("li", { className: `sc-app${status.connected && app.running ? " sc-app-on" : ""}` });
+    const label = !status.connected ? "not connected" : app.running ? "running" : "not running";
+    item.append(
+      element("span", { className: "sc-app-mark", textContent: APP_MARKS[app.key] || "📱" }),
+      element("span", { className: "sc-app-text", textContent: `${app.name} — ${app.purpose}` }),
+      element("span", { className: "sc-app-state", textContent: label }));
+    return item;
+  }));
+  $("apps-menu-toggle").textContent = status.connected ? "Disconnect Luna apps" : "Connect Luna apps";
+  $("apps-menu-toggle").dataset.connected = button.dataset.connected;
+}
+
+async function toggleApps(event) {
+  if (!event.currentTarget.dataset.connected) {
+    location.href = "/apps/connect";
+    return;
+  }
+  if (!confirm("Disconnect your Luna apps? She will no longer be able to use them.")) return;
+  await fetch("/api/apps", { method: "DELETE" });
+  showApps();
+}
+
+$("apps").addEventListener("click", toggleApps);
+$("apps-menu-toggle").addEventListener("click", toggleApps);
+
 wire();
 route();
+showApps();
