@@ -2,6 +2,7 @@
 
 1. A small embedding model (Qwen3-Embedding-0.6B, about 1.2 GB, run here with transformers) turns a message, with
    the line before it, into 1,024 numbers. (Ollama has the same model, but its engine hung loading it on 17 Nov.)
+   The line before is embedded apart from the message, and the neuron reads both side by side (2 x 1,024).
 2. Two tiny classifiers (logistic regression: one "neuron" each) read those numbers:
    - on your messages: is there a lasting fact about you? (them / none)
    - on her replies: did she say something new and lasting about herself? (me / none)
@@ -27,7 +28,10 @@ from app.ollama import Ollama
 from app.store import SociaStore
 
 GENERATED = Path(__file__).parent / "results" / "remember" / "generated.jsonl"
+# Lines from your own chats, labelled for training (same format, with "chat"): those chats are left out of the test.
+FROM_CHATS = Path(__file__).parent / "results" / "remember" / "from_chats.jsonl"
 EMBED_MODEL = "Qwen/Qwen3-Embedding-0.6B"
+EMBED_CACHE = Path("/training/hf/hub")
 TASKS = {
     "you": "Decide whether the message states a lasting fact about the person who wrote it, worth remembering",
     "her": "Decide whether the message states a new, lasting fact about the woman who wrote it, about herself",
@@ -38,17 +42,37 @@ POSITIVE = {"you": "them", "her": "me"}
 # ------------------------------------------------------------------------------------------------- data
 
 def load_generated(path: Path = GENERATED) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def with_context(rows: list[dict[str, Any]], seed: int = 21) -> list[dict[str, Any]]:
+    """Every line given a line before it from the other side, as in a real chat. Lines that come without one get an
+    ordinary line (a non-fact) from the other side, picked at random. Otherwise "has a previous message" gives the
+    answer away: in written examples it came mostly with short answers that are facts ("yes, a dog, Simba"), while
+    in a real chat every message has one."""
+    rng = random.Random(seed)
+    pool = {who: [r["text"] for r in rows if r["who"] == who and r["label"] == "none"] for who in ("you", "her")}
+    out = []
+    for row in rows:
+        if not row.get("before"):
+            other = "her" if row["who"] == "you" else "you"
+            row = {**row, "before": rng.choice(pool[other]) if pool[other] else ""}
+        out.append(row)
+    return out
+
+
 def real_rows(store: SociaStore, labels: list[dict[str, Any]], companion_id: int, none_per_chat: int = 10,
-              seed: int = 7) -> list[dict[str, Any]]:
+              seed: int = 7, skip_chats: set[int] | frozenset = frozenset()) -> list[dict[str, Any]]:
     """Your labelled messages (and hers), each with the line before it from the other side; plus some of your
     messages that were not even candidates, as "none"."""
     by_id = {int(row["message_id"]): row for row in labels}
     rng = random.Random(seed)
     out = []
     for chat in store.chats(companion_id):
+        if chat["id"] in skip_chats:
+            continue  # trained on: never a test
         rows = store.recent(chat["id"], 100000)
         unlisted = []
         for index, row in enumerate(rows):
@@ -70,9 +94,8 @@ def real_rows(store: SociaStore, labels: list[dict[str, Any]], companion_id: int
 
 
 def query(row: dict[str, Any]) -> str:
-    """What the embedding model reads: the task, then the line before (if any) and the message."""
-    before = f"Previous message: {row['before']}\n" if row.get("before") else ""
-    return f"Instruct: {TASKS[row['who']]}\nQuery: {before}Message: {row['text']}"
+    """What the embedding model reads for the message itself: the task, then the message alone."""
+    return f"Instruct: {TASKS[row['who']]}\nQuery: {row['text']}"
 
 
 # ----------------------------------------------------------------------------------------------- embed
@@ -87,23 +110,41 @@ def embedder():
         from transformers import AutoModel, AutoTokenizer
 
         device = "cuda" if torch.cuda.is_available() and torch.cuda.mem_get_info()[0] > 2 * 2**30 else "cpu"
-        tokenizer = AutoTokenizer.from_pretrained(EMBED_MODEL, padding_side="left")
-        model = AutoModel.from_pretrained(EMBED_MODEL, dtype=torch.float16 if device == "cuda" else torch.float32)
+        # Into the training volume: HF_HOME from Socia's settings points at /data, read-only here.
+        cache = str(EMBED_CACHE)
+        tokenizer = AutoTokenizer.from_pretrained(EMBED_MODEL, padding_side="left", cache_dir=cache)
+        model = AutoModel.from_pretrained(EMBED_MODEL, dtype=torch.float16 if device == "cuda" else torch.float32,
+                                          cache_dir=cache)
         _embedder.update(tokenizer=tokenizer, model=model.to(device).eval(), device=device)
     return _embedder["tokenizer"], _embedder["model"], _embedder["device"]
 
 
 def embed(config: SociaConfig | None, rows: list[dict[str, Any]], batch: int = 32, plain: bool = False):
-    """Each row as a unit-length vector: the embedding model's last token, as Qwen3-Embedding is meant to be read.
-    ``plain``: the text alone, without the task (for comparing facts)."""
+    """What the neurons read for each row: the message (with the task) and, apart from it, the line before it,
+    side by side (2 x 1,024 numbers). Embedded together, the line before blurred into the message: "Any secrets?"
+    after her long reply about herself read as a fact. Apart, the neuron weighs each on its own.
+    ``plain``: one sentence each, without the task (for comparing facts with each other)."""
+    import torch
+
+    if plain:
+        return _vectors([r["text"] for r in rows], batch)
+    message = _vectors([query(r) for r in rows], batch)
+    before = _vectors([r.get("before") or "(start of the chat)" for r in rows], batch)
+    return torch.cat([message, before], dim=1)
+
+
+def _vectors(texts: list[str], batch: int = 32):
+    """Unit-length vectors: the embedding model's last token, as Qwen3-Embedding is meant to be read."""
+    import torch
+
     import torch
 
     tokenizer, model, device = embedder()
     vectors = []
     with torch.no_grad():
-        for start in range(0, len(rows), batch):
-            texts = [r["text"] if plain else query(r) for r in rows[start:start + batch]]
-            tokens = tokenizer(texts, padding=True, truncation=True, max_length=512, return_tensors="pt").to(device)
+        for start in range(0, len(texts), batch):
+            chunk = texts[start:start + batch]
+            tokens = tokenizer(chunk, padding=True, truncation=True, max_length=512, return_tensors="pt").to(device)
             hidden = model(**tokens).last_hidden_state[:, -1]
             vectors.append(torch.nn.functional.normalize(hidden.float(), dim=1).cpu())
     return torch.cat(vectors)

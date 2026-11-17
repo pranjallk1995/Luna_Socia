@@ -29,6 +29,8 @@
       ],
       "settings": {
         "python.defaultInterpreterPath": "/usr/local/bin/python",
+        // Notebook 03's environment (torch), so it shows in the kernel picker as well as "Jupyter Kernel…".
+        "python.venvPath": "/opt",
         "jupyter.notebookFileRoot": "/workspace/notebooks"
       }
     }

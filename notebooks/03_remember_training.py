@@ -201,7 +201,8 @@ from transformers import AutoTokenizer
 # The Hugging Face weights of her Ollama model (the same abliterated Qwen3 8B, before Ollama's Q4_K_M).
 BASE_REPO = "huihui-ai/Qwen3-8B-abliterated"
 BASE_DIR = rl.TRAINING / "base" / BASE_REPO.replace("/", "--")
-snapshot_download(BASE_REPO, local_dir=BASE_DIR, allow_patterns=["*.json", "*.txt", "tokenizer*"])
+snapshot_download(BASE_REPO, local_dir=BASE_DIR, cache_dir=rl.TRAINING / "hf" / "hub",
+                  allow_patterns=["*.json", "*.txt", "tokenizer*"])
 tokenizer = AutoTokenizer.from_pretrained(BASE_DIR)
 
 sample = next(e for e in train_set if e.kind == "them")
@@ -248,7 +249,8 @@ import torch
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, BitsAndBytesConfig
 
-snapshot_download(BASE_REPO, local_dir=BASE_DIR, allow_patterns=["*.json", "*.txt", "tokenizer*", "*.safetensors"])
+snapshot_download(BASE_REPO, local_dir=BASE_DIR, cache_dir=rl.TRAINING / "hf" / "hub",
+                  allow_patterns=["*.json", "*.txt", "tokenizer*", "*.safetensors"])
 model = AutoModelForCausalLM.from_pretrained(
     BASE_DIR, device_map={"": 0}, dtype=torch.bfloat16, attn_implementation="sdpa",
     quantization_config=BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
@@ -413,11 +415,18 @@ print("new model:", NEW_MODEL)
 # - **The fact writer** is her chat model with one narrow job: write the fact in one line. It sees
 #   what she already knows and may still answer NONE.
 #
-# **Training data:** 337 labelled lines Claude wrote (`results/remember/generated.jsonl`): 90 of your
-# facts, 90 of your non-facts, 52 of her facts, 105 of her non-facts. The non-facts include her
-# everyday style: what she is doing right now, offers, feelings. **Test data:** your labelled
-# chats from step 2, never trained on. Without labels yet, only the generated set is checked
-# (cross-validation).
+# **Training data:**
+# - lines Claude wrote (`results/remember/generated.jsonl`): facts and non-facts for both of you,
+#   in your texting style and hers, including the hard ones: corrections, testing the app, knowledge
+#   questions, lists, photo talk, and what she is doing right now;
+# - lines from your own chats that Claude labelled (`results/remember/from_chats.jsonl`). Those
+#   chats are left out of the test.
+#
+# A fact she already has (her bio again) is still labelled a fact: the neuron can't know her bio,
+# and the duplicate check (B2) catches it. This way the same neurons work for every girlfriend.
+#
+# **Test data:** your labelled chats from step 2, never trained on. Until you label them, B1 checks
+# neurons trained on Claude's lines alone against the chats Claude labelled.
 #
 # Needs: the setup cell, step 1 (the baseline) and, for the real test, step 2's labels. Steps 3–7
 # can be skipped.
@@ -426,10 +435,16 @@ print("new model:", NEW_MODEL)
 import remember_classifier as rc
 import torch
 
-generated = rc.load_generated()
+# Each written line gets a line before it, as every message in a real chat has (see rc.with_context).
+written = rc.with_context(rc.load_generated())
+from_chats = rc.load_generated(rc.FROM_CHATS)
+TRAIN_CHATS = {row["chat"] for row in from_chats}
+generated = [*written, *from_chats]  # everything trained on
 labels = rl.read_labels() if rl.LABELS.exists() else []
-real = rc.real_rows(store, labels, COMPANION) if any(row["label"] for row in labels) else []
-print("generated:", Counter((r["who"], r["label"]) for r in generated))
+real = (rc.real_rows(store, labels, COMPANION, skip_chats=TRAIN_CHATS)
+        if any(row["label"] for row in labels) else [])
+print("Claude's lines:   ", Counter((r["who"], r["label"]) for r in written))
+print("from your chats:  ", Counter((r["who"], r["label"]) for r in from_chats), "chats", sorted(TRAIN_CHATS))
 print("your chats:", Counter((r["who"], r["label"]) for r in real) or "not labelled yet (step 2)")
 table(generated[::12], ["who", "label", "before", "text", "fact"])
 
@@ -442,7 +457,7 @@ print(f"embedding model ready in {_time.perf_counter() - started:.1f} s, on the 
 started = _time.perf_counter()
 x_generated = rc.embed(config, generated)
 x_real = rc.embed(config, real) if real else None
-print(f"{len(generated) + len(real)} lines embedded in {_time.perf_counter() - started:.1f} s → {x_generated.shape[1]} numbers each")
+print(f"{len(generated) + len(real)} lines embedded in {_time.perf_counter() - started:.1f} s → {x_generated.shape[1]} numbers each (message + line before)")
 await models_on_gpu(config)
 
 # %% [markdown]
@@ -477,18 +492,37 @@ if real:
         print("Its biggest mistakes:")
         table(rc.mistakes(rows, y, proba, 0.5), ["p", "should be", "before", "text"])
 else:
-    print("Label your chats (step 2) to test on them. The generated set's mistakes, for now:")
+    print("Label your chats (step 2) to test on them. The training set's mistakes, for now:")
     for who in ("you", "her"):
         rows, y, proba = by_who[who]
         table(rc.mistakes(rows, y, proba, 0.5, limit=8), ["p", "should be", "before", "text"])
 
 # %% [markdown]
-# ✋ **Look:** pick a threshold per neuron. A missed fact costs a memory; a false alarm costs a wasted
-# call to the fact writer, which can still answer NONE. So a lowish threshold (0.3–0.4) is usually
-# right.
+# **Your style, before you label anything:** neurons trained on Claude's lines **alone**, tested
+# on the lines from your chats that Claude labelled. They never saw your chats, so this shows how
+# well lines written by Claude carry over to how you two actually text.
 
 # %%
-THRESHOLD = {"you": 0.4, "her": 0.5}
+if from_chats:
+    x_written, x_from = x_generated[:len(written)], x_generated[len(written):]
+    for who in ("you", "her"):
+        train_i = [i for i, r in enumerate(written) if r["who"] == who]
+        test_i = [i for i, r in enumerate(from_chats) if r["who"] == who]
+        neuron = rc.Neuron().fit(x_written[train_i], rc.labels_of([written[i] for i in train_i], who))
+        rows = [from_chats[i] for i in test_i]
+        y, proba = rc.labels_of(rows, who), neuron.proba(x_from[test_i])
+        print(f"\n{who}: trained on Claude's lines, tested on YOUR CHATS {sorted(TRAIN_CHATS)} ({len(rows)} lines)")
+        table(rc.thresholds(y, proba), ["threshold", "facts caught", "false alarms", "precision", "recall"])
+        table(rc.mistakes(rows, y, proba, 0.5, limit=10), ["p", "should be", "before", "text"])
+
+# %% [markdown]
+# ✋ **Look:** pick a threshold per neuron. A missed fact means you remind her, which is fine (she
+# can still save it herself when you ask). A false alarm puts something wrong in her memory or bio.
+# So choose a threshold where false alarms are rare, even if she catches fewer facts: 0.5 or
+# higher.
+
+# %%
+THRESHOLD = {"you": 0.5, "her": 0.5}
 for who, value in THRESHOLD.items():
     neurons[who].threshold = value
 
