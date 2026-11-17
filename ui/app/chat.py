@@ -352,8 +352,10 @@ def ago(count: int) -> str:
 
 class Conversation:
     def __init__(self, config: SociaConfig, store: SociaStore, ollama: Ollama, comfy: ComfyUI,
-                 apps: LunaApps | None = None, faces: Faces | None = None) -> None:
+                 apps: LunaApps | None = None, faces: Faces | None = None, rememberer: Any = None) -> None:
         self.config = config
+        # Decides after each text turn what is worth remembering (app/remembering.py); None leaves it to her tool.
+        self.rememberer = rememberer
         # Face recognition, paired with the vision model: whose faces are in the pictures it sees.
         self.faces = faces
         self.store = store
@@ -733,6 +735,21 @@ class Conversation:
                         yield {"type": "text", "text": piece["text"]}
             except Exception:  # noqa: BLE001 - the picture or reaction alone is enough
                 logger.exception("Caption failed")
+
+        if self.rememberer is not None and not seeing and rows and rows[-1]["role"] == "user":
+            # What this turn taught her, besides what her remember tool saved: shown with it under her reply.
+            yours = rows[-1]
+            before = next((r["content"] or "" for r in reversed(rows[:-1]) if r["role"] != "user"), "")
+            try:
+                learnt = await self.rememberer.after_turn(companion["id"], " ".join(before.split()),
+                                                          " ".join((yours["content"] or "").split()),
+                                                          " ".join(text.split()))
+            except Exception:  # noqa: BLE001 - her reply stands without it
+                logger.exception("Remembering after the turn failed")
+                learnt = []
+            facts = [*remembered, *(item["fact"] for item in learnt if item["fact"] not in remembered)]
+            if len(facts) > len(remembered):
+                yield {"type": "remembered", "facts": facts}
 
         saved = await asyncio.to_thread(self.store.add_message, chat_id, "luna", text.strip(), image_id, None, used_apps)
         yield {"type": "done", "message": serialize(saved)}

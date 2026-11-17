@@ -361,7 +361,23 @@ class Rememberer:
         return out
 
     def save(self, path: Path) -> None:
+        """The neurons as torch tensors (``path``) and as the numpy file Socia reads (``neurons.npz`` beside it)."""
         import torch
 
         torch.save({"embed_model": EMBED_MODEL, "tasks": TASKS,
                     "you": self.neurons["you"].state(), "her": self.neurons["her"].state()}, path)
+        save_npz(self.neurons, path.with_name("neurons.npz"))
+
+
+def save_npz(neurons: dict[str, "Neuron"], path: Path) -> None:
+    """What Socia's app/remembering.py loads: for each neuron its mean, std, weights, bias and threshold."""
+    import numpy as np
+
+    arrays = {}
+    for who, neuron in neurons.items():
+        arrays[f"{who}_mean"] = neuron.mean.numpy()
+        arrays[f"{who}_std"] = neuron.std.numpy()
+        arrays[f"{who}_weight"] = neuron.weight.numpy()
+        arrays[f"{who}_bias"] = np.float32(neuron.bias.item())
+        arrays[f"{who}_threshold"] = np.float32(neuron.threshold)
+    np.savez(path, **arrays)

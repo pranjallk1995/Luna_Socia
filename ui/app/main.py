@@ -16,6 +16,7 @@ from app.images import ComfyUI
 from app.memory import MemoryReader
 from app.ollama import Ollama
 from app.persona import DEFAULT_PERSONA
+from app.remembering import Rememberer
 from app.store import SociaStore
 from app.voice import Voice
 from app.web import create_app
@@ -58,7 +59,12 @@ def main() -> None:
     apps = LunaApps(config, store)
     faces = Faces(config)
     threading.Thread(target=faces.preload, name="faces-preload", daemon=True).start()
-    conversation = Conversation(config, store, ollama, comfy, apps, faces)
+    rememberer = None
+    if config.remember_auto:
+        rememberer = Rememberer(config, store, ollama.complete)
+        # The embedding model downloads (once) and loads beside her voice, not at the first reply.
+        threading.Thread(target=rememberer.preload, name="remember-preload", daemon=True).start()
+    conversation = Conversation(config, store, ollama, comfy, apps, faces, rememberer)
     reader = MemoryReader(store, ollama, conversation.turn, config.read_chats)
     voice = Voice(config)
     # Her voice loads and warms up beside the server starting, not on the first voice message.

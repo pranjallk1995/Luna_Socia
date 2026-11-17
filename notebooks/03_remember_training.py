@@ -596,15 +596,17 @@ print("classifier + fact writer:    ", rl.scores(after_b))
 # The extra time per turn is the `seconds` above: the embeddings, plus the fact writer only when a
 # neuron says yes.
 #
-# If it does, it goes into Socia like this (not done here):
-# 1. After each reply, in the background, as the chat reader once ran: embed both lines and ask the
-#    two neurons.
-# 2. On a yes, the fact writer runs, then `store.remember` (about you) or `store.add_to_bio`
-#    (about her), shown as "Remembered:".
-# 3. Her `remember` tool can stay for when you ask her outright.
+# In Socia it works like this:
+# 1. After each text reply (not after photos), both lines are embedded and the two neurons are
+#    asked.
+# 2. On a yes, the fact writer runs, then `store.remember` (about you) or `store.add_to_bio` (about
+#    her), shown as "Remembered:".
+# 3. Her `remember` tool stays, for when you ask her outright.
 #
-# The cell below saves the neurons, trained on the generated lines plus your labelled chats, for
-# that.
+# **It is in Socia** (`ui/app/remembering.py`), after each text turn. The cell below saves the
+# neurons, trained on the written lines plus your labelled chats, as `results/remember/neurons.npz`.
+# Copy that file into Socia's data volume (the command is printed below), and Socia uses your
+# neurons instead of the ones it ships with, which are trained on the written lines only.
 
 # %%
 final = {}
@@ -615,4 +617,7 @@ for who in ("you", "her"):
     final[who] = rc.Neuron(THRESHOLD[who]).fit(x, rc.labels_of(rows, who))
 SAVED = rl.RESULTS / f"neurons-{datetime.now():%Y%m%d-%H%M}.pt"
 rc.Rememberer(config, final["you"], final["her"]).save(SAVED)
-print("saved", SAVED)
+print("saved", SAVED, "and", SAVED.with_name("neurons.npz"))
+print("Socia uses them after, in WSL:\n  docker exec luna_socia-ui-1 mkdir -p /data/remember && "
+      "docker cp notebooks/results/remember/neurons.npz luna_socia-ui-1:/data/remember/neurons.npz && "
+      "docker restart luna_socia-ui-1")

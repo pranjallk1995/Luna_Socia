@@ -87,6 +87,11 @@ class SociaConfig:
     # Read her chats, once quiet, for lasting facts (LUNASOCIA_READ_CHATS=1). Off until it is reliable on real
     # chats: on 17 November it filled her memory with what photos showed and gave her the owner's cats.
     read_chats: bool = False
+    # After each text turn, a small classifier decides whether your message or her reply holds a lasting fact, and
+    # her chat model writes it into her memory or bio (app/remembering.py). LUNASOCIA_REMEMBER_AUTO=0 leaves it to
+    # her remember tool alone. Its embedding model runs on the "cpu" (no GPU memory) or "cuda" (1.2 GB).
+    remember_auto: bool = True
+    remember_device: str = "cpu"
     data_dir: Path = Path("/data")
     # Shared with Luna Sentia (LUNASOCIA_API_TOKEN in both .env files), whose model monitor
     # asks GET /api/models about the voice models; blank lets only the owner's session ask.
@@ -125,6 +130,8 @@ class SociaConfig:
             tts_voice=setting("LUNASOCIA_TTS_VOICE", cls.tts_voice),
             voice_device=setting("LUNASOCIA_VOICE_DEVICE", cls.voice_device).lower(),
             read_chats=setting("LUNASOCIA_READ_CHATS", "") == "1",
+            remember_auto=setting("LUNASOCIA_REMEMBER_AUTO", "1") != "0",
+            remember_device=setting("LUNASOCIA_REMEMBER_DEVICE", cls.remember_device).lower(),
             data_dir=Path(setting("LUNASOCIA_DATA_DIR", "/data")),
             api_token=os.getenv("LUNASOCIA_API_TOKEN", "").strip(),
         )
