@@ -7,7 +7,7 @@
 ![PostgreSQL in Luna Sentia](https://img.shields.io/badge/PostgreSQL-in_Luna_Sentia-4169E1?logo=postgresql&logoColor=white)
 ![NVIDIA GPU required](https://img.shields.io/badge/NVIDIA_GPU-required-76B900?logo=nvidia&logoColor=white)
 ![Owner only](https://img.shields.io/badge/Access-owner_only-8A2BE2)
-![Status: v1.0](https://img.shields.io/badge/Status-v1.0-2EA043)
+![Status: v1.1](https://img.shields.io/badge/Status-v1.1-2EA043)
 
 <p align="center">
   <img src="ui/app/static/logo.png" alt="Luna Socia" width="160">
@@ -170,6 +170,19 @@ Reading her chats in Socia the same way is built but off (`LUNASOCIA_READ_CHATS=
 on): on real chats it still took what photos showed for facts about you.
 `model_evaluations/remember.py` checks what she would remember before it is turned on.
 
+In a chat she can also save a fact herself with her `remember` tool: one about you goes into what
+she remembers, and one about herself into her bio. It shows as "Remembered:" under her reply. She
+uses it too rarely, and sometimes says "I'll remember that" without making the call. **Refresh**,
+beside what she remembers in "Edit her", loads facts she saved in chats since you opened it.
+
+[Notebook 03](notebooks/03_remember_training.py) tries two ways to make her remember by herself:
+- a LoRA fine-tune of her chat model;
+- a small classifier beside it. One neuron each, on a small embedding model, decides whether your
+  message or her reply holds a lasting fact, and her chat model then writes it in one line.
+
+Both are measured against the same baseline, on your own labelled chats. Neither is in the chat
+yet.
+
 Her persona and memory are prompt-only for now: a separate model per girlfriend would not fit
 on the GPU beside the resident chat model. The imported conversations stay in the database as
 the training data for her fine-tuned model later.
@@ -292,7 +305,10 @@ the chat model has left the GPU.
 [`notebooks/`](notebooks/README.md) runs Socia's code one step at a time in VS Code, in a container
 beside the running Socia (`.devcontainer/`, with no Jupyter server or port), and shows every step's result: what the vision model is sent and answers, the
 chat as each model reads it, the tokens, and the GPU while each step runs. `01_photo_flow`
-follows a photo to her reply, with the faces found in it and whose they are; `02_picture_flow` follows a picture from her call to ComfyUI.
+follows a photo to her reply, with the faces found in it and whose they are; `02_picture_flow` follows a picture from her call to ComfyUI;
+`03_remember_training` teaches her when to remember: your labels, the LoRA fine-tune, and the
+classifier, each against the same baseline. It has its own kernel, **Luna training (torch)**, and
+keeps the models it downloads in the `luna_socia_training` volume.
 Open them with **Dev Containers: Reopen in Container**. Their outputs (your chats and her pictures) are never
 committed.
 
@@ -301,5 +317,5 @@ committed.
 ```bash
 docker compose build ui
 docker run --rm --network none --entrypoint python -v "$PWD/ui/tests:/workspace/ui/tests:ro" \
-  ghcr.io/pranjallk1995/luna-socia-ui:v1.0.0 -m unittest discover -s tests
+  ghcr.io/pranjallk1995/luna-socia-ui:v1.1.0 -m unittest discover -s tests
 ```

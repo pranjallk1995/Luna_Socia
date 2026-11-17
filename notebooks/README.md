@@ -9,6 +9,7 @@ Later notebooks will hold the training and evaluation work. What to improve next
 |---|---|
 | [01_photo_flow](01_photo_flow.py) | you send her a photo: the faces found in it and whose they are, the pictures the vision model sees, her prompt, her reply, the photo's note, the swap back to her chat model |
 | [02_picture_flow](02_picture_flow.py) | she takes a picture: her references, the image model's instruction, the ComfyUI graph, the latents |
+| [03_remember_training](03_remember_training.py) | teaching her chat model to call `remember` by herself: baseline, your labels, made-up examples in her own words, QLoRA training, the adapter into Ollama, before and after |
 
 ## Start, in VS Code
 
@@ -54,9 +55,18 @@ docker exec -w /workspace luna_socia-notebooks python model_evaluations/self_rec
 - **Never:** outputs (your chats and her pictures), any `.ipynb` copy, `results/`,
   `ACTION_ITEMS.md`, and the settings `start.sh` writes. `.gitignore` keeps all of these out.
 
+## Training (03)
+
+Notebook 03 runs on its own kernel, **Luna training (torch)**. That's an environment in the same image
+with torch, PEFT and bitsandbytes, which also sees Socia's libraries. The base model's Hugging Face
+weights (16 GB), each run's adapter and llama.cpp's converters go into the Docker volume
+`luna_socia_training`, mounted at `/training`, so they survive a rebuilt container. After pulling
+this, run **Dev Containers: Rebuild Container** once, so the container gets the new kernel and the
+volume. Training needs her chat model off the GPU; the notebook says when.
+
 ## Safe to run
 
-- **Nothing is written to her database.**
+- **Nothing is written to her database.** Notebook 03 adds a new model to Ollama when you get to step 6. Her chat model stays as it is.
 - **Making a picture** (`MAKE = True` in 02) takes the GPU from her chat models for about 40 s.
 - **Loading a model** at another context reloads it, as happens in the chat.
 - **The Luna apps step** in 01 is off by default: it shares Socia's sign-in to your apps.

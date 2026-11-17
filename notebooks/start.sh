@@ -27,5 +27,6 @@ docker build -q --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" -t luna-so
 [ "${1:-prepare}" = run ] || exit 0
 docker rm -f "$name" >/dev/null 2>&1 || true
 docker run -d --name "$name" --network luna_sentia_network --env-file "$here/.socia.env" \
-  --gpus all --volumes-from luna_socia-ui-1:ro -v "$repo:/workspace" luna-socia-notebooks:local >/dev/null
+  --gpus all --volumes-from luna_socia-ui-1:ro -v "$repo:/workspace" \
+  -v luna_socia_training:/training luna-socia-notebooks:local >/dev/null
 echo "Running: docker exec -it $name python ..."

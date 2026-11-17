@@ -13,7 +13,9 @@
     "--network", "luna_sentia_network",
     "--env-file", "${localWorkspaceFolder}/notebooks/.socia.env",
     "--gpus", "all",
-    "--volumes-from", "luna_socia-ui-1:ro"
+    "--volumes-from", "luna_socia-ui-1:ro",
+    // Training (notebook 03): the base model and adapters, kept between containers.
+    "--volume", "luna_socia_training:/training"
   ],
   "remoteUser": "luna",
   "containerEnv": { "PYTHONPATH": "/workspace/ui:/workspace/notebooks" },
