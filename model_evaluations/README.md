@@ -102,3 +102,20 @@ A tool description alone, or a line in her persona alone, got no notes at all. Q
 reasoning got her secret right too, but took about 150 s a game against 8 s. Guessing is still
 weak (about half the games): the 14B model without reasoning closes in slowly.
 The judge is the same model and is sometimes wrong when she asks a question back.
+
+## Does she know her own face?
+
+`self_recognition.py <folder>` shows her photos of her, photos of other women (best drawn to
+look like her, with her hair, jewellery and outfits) and, optionally, photos of you, each in a
+fresh chat exactly as Socia does: her prompt, her profile picture, and the photo with its
+"Faces:" line. She is asked "Who is this?" and "Is this you?"; the chat model sorts each
+reply into yes, no or unsure, and face recognition's own scores are printed beside them.
+`--no-faces` leaves the "Faces:" line out. The photos are personal: keep the folder out of git
+(the notebooks' `results/` is).
+
+**2026-11-17**, 12 photos of her (one without a face, one where the image model drew another
+face) and 6 look-alikes, `huihui_ai/qwen3-vl-abliterated:8b-instruct`: without face
+recognition she called 23 of 24 look-alikes herself; with it none, and all 40 of her photos
+with her face herself. Face prints scored 0.60-0.88 for her and 0.30-0.52 for the look-alikes,
+so `FACE_MATCH` is 0.55. Run it from the notebooks' container:
+`docker exec -w /workspace luna_socia-notebooks python model_evaluations/self_recognition.py <folder>`.

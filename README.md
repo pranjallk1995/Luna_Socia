@@ -20,6 +20,7 @@ for the owner only. Its models run in Luna Sentia, which every Luna app shares.
 | --- | --- | --- | --- |
 | Chat | `LUNASOCIA_CHAT_MODEL` (default `huihui_ai/qwen3-abliterated:8b`, an uncensored Qwen3 8B, about 5.2 GB with 8k context), resident on the GPU | Sentia's Ollama, through its monitor, on the GPU | Compare it with [`model_evaluations/`](model_evaluations/README.md) and check it fits with Sentia's `model_checks/check_model.py --context 8192` |
 | Photos sent to Luna | `LUNASOCIA_VISION_MODEL` (default `huihui_ai/qwen3-vl-abliterated:8b-instruct`, an uncensored Qwen3-VL 8B, about 5.7 GB with 8k context) sees them and answers as her, then describes each photo for her later replies (`LUNASOCIA_VISION_CONTEXT_TOKENS`, default 8192). It takes the chat model's place on the GPU for that reply | Sentia's Ollama, on the GPU | Socia's cat game (`model_evaluations/`), then a few photos by hand |
+| Faces in photos | InsightFace `buffalo_l` (SCRFD finds faces, ArcFace makes a face print of each), compared with her profile picture and other pictures, and with your photos in "Photos of you" (similar enough at `FACE_MATCH` 0.55). Paired with the vision model: it tells it whose faces are in each picture | Here, on the GPU (about 50 ms a photo), downloaded once to the data volume | `model_evaluations/self_recognition.py` |
 | Pictures of Luna | Qwen-Image 2.1 Turbo, 8 steps; her profile picture and up to 4 other pictures of her are the face references | Sentia's ComfyUI, on the GPU | A few pictures by hand |
 | Voice messages | faster-whisper `LUNASOCIA_STT_MODEL` (default `large-v3-turbo`, int8/float16) | Here, on the GPU (`LUNASOCIA_VOICE_DEVICE`, default `cuda`; `cpu` to keep it off the GPU), loaded at start | A few voice messages by hand |
 | Her voice | Kokoro 82M, in the voice chosen for her (16 female English and Hindi voices; `LUNASOCIA_TTS_VOICE`, default `af_heart`, for new girlfriends) | Here, on the GPU with Whisper (about 1.75 GB for both), loaded at start | Listen to a few replies |
@@ -44,6 +45,9 @@ Create one from the card on the landing page, and change her later with "Edit he
   how you met), which goes into her persona.
 - **Her picture:** her profile picture is her face in every picture she takes. Crop her
   avatar and add up to 4 more pictures of her from her chat's settings.
+- **Your face:** add up to 5 photos of yourself under "Photos of you" in a chat's settings
+  menu, so she knows you in the photos you send. Each must show a face; one face a photo,
+  straight on and turned a little, works best.
 - **How she texts:** one of five styles (playful, sweet, sassy, shy, calm), reply length,
   how many emoji, and her language (yours, English, Hinglish, or Hindi in Devanagari).
 - **Her voice:** one of Kokoro's English and Hindi voices, each with a sample to play.
@@ -73,7 +77,10 @@ her chats move to her, and her files to `/data/companions/<id>`.
    - **With a photo**, or a question about one from the last 4 messages ("which one is
      better?", "what did I circle?"), the vision model answers instead. It sees her profile
      picture (her own face), the chat's last 3 photos and pictures, and the last 16
-     messages. It then describes your photo once, and her later replies, from the chat model,
+     messages. Under each picture, face recognition says whose faces are in it: hers, yours
+     (from "Photos of you" in the settings menu), or someone else's. The vision model goes
+     by that rather than by how a face looks: on its own it took 23 of 24 women drawn to look
+     like her for herself, and with it none. It then describes your photo once, and her later replies, from the chat model,
      read that description in brackets. Right after, Socia swaps the chat model back onto the
      GPU in the background, so your next message does not wait for it.
 3. When a picture fits (you ask for a selfie, or for her to step into your photo from this chat), she calls
@@ -158,8 +165,9 @@ listed in [Luna Sentia's Releases](https://github.com/pranjallk1995/Luna_Sentia#
 
 The `luna_socia_data` volume holds each girlfriend's profile picture and avatar crop
 (`/data/companions/<id>`) and her other pictures (`/data/companions/<id>/references`, added
-and removed in her settings), the pictures and photos of the chats (`/data/images`), and the
-voice models, downloaded the first time they are used (`/data/models`), with CUDA's kernels
+and removed in her settings), the owner's photos of themselves (`/data/owner/photos`, from
+"Photos of you"), the pictures and photos of the chats (`/data/images`), and the
+voice and face models, downloaded the first time they are used (`/data/models`), with CUDA's kernels
 for this GPU (`/data/models/cuda-cache`): the first start compiles them, in about 30 s.
 
 The database keeps each girlfriend (`companions`: persona, voice, memory), her chats (`chats`,
@@ -182,15 +190,16 @@ that it fits with Luna Sentia's `model_checks/check_model.py <model> --context 8
 the full list of checks is in Sentia's
 [Changing a model](https://github.com/pranjallk1995/Luna_Sentia#changing-a-model).
 Before changing `LUNASOCIA_VISION_MODEL`, play the cat game with both (her photos of three
-cats, then "who is this?"), and check that it fits beside her voice when the chat model has
-left the GPU.
+cats, then "who is this?"), run `model_evaluations/self_recognition.py` on photos of her and
+of women drawn to look like her, and check that it fits beside her voice and face models when
+the chat model has left the GPU.
 
 ## Notebooks
 
 [`notebooks/`](notebooks/README.md) runs Socia's code one step at a time in Jupyter, beside the
 running Socia, and shows every step's result: what the vision model is sent and answers, the
 chat as each model reads it, the tokens, and the GPU while each step runs. `01_photo_flow`
-follows a photo to her reply; `02_picture_flow` follows a picture from her call to ComfyUI.
+follows a photo to her reply, with the faces found in it and whose they are; `02_picture_flow` follows a picture from her call to ComfyUI.
 Start them with `./notebooks/start.sh`. Their outputs (your chats and her pictures) are never
 committed.
 

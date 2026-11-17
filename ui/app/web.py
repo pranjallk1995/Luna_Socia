@@ -476,6 +476,51 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
             return JSONResponse({"deleted": True})
         return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
+    def owner_photos_json(note: str = "") -> dict[str, Any]:
+        return {"photos": [{"name": path.name, "url": f"/api/owner/photos/{path.name}"} for path in config.owner_photos()],
+                "max": SociaConfig.MAX_OWNER_PHOTOS, **({"note": note} if note else {})}
+
+    async def owner_photos(request: Request) -> Response:
+        """Photos of the owner's face (listed, or added), so she knows them in the photos they send."""
+        user = await owner(request)
+        if isinstance(user, Response):
+            return user
+        if request.method == "POST":
+            form = await request.form(max_part_size=SociaConfig.MAX_UPLOAD_BYTES)
+            uploads = [u for u in form.getlist("photos") if hasattr(u, "read")]
+            if not uploads:
+                return JSONResponse({"error": "Choose a photo."}, 400)
+            if len(config.owner_photos()) + len(uploads) > SociaConfig.MAX_OWNER_PHOTOS:
+                return JSONResponse({"error": f"Keep {SociaConfig.MAX_OWNER_PHOTOS} photos of you at most."}, 400)
+            folder = config.owner_photos_dir
+            folder.mkdir(parents=True, exist_ok=True)
+            skipped = 0
+            for upload in uploads:
+                data = await asyncio.to_thread(normalized_photo, await upload.read())
+                faces = conversation.faces
+                if faces is not None:
+                    found, _ = await asyncio.to_thread(faces.read, data)
+                    if not found:
+                        skipped += 1
+                        continue
+                (folder / f"{time.time_ns()}-{uuid.uuid4().hex[:8]}.jpg").write_bytes(data)
+            note = f"{skipped} of them had no face she could find, so they were not kept." if skipped else ""
+            return JSONResponse(owner_photos_json(note))
+        return JSONResponse(owner_photos_json())
+
+    async def owner_photo(request: Request) -> Response:
+        user = await owner(request)
+        if isinstance(user, Response):
+            return user
+        name = request.path_params["name"]
+        path = config.owner_photos_dir / name
+        if not REFERENCE_NAME.fullmatch(name) or not path.exists():
+            return JSONResponse({"error": "no such photo"}, 404)
+        if request.method == "DELETE":
+            path.unlink()
+            return JSONResponse({"deleted": True})
+        return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
     async def memory(request: Request) -> Response:
         """What she remembers (GET), or the owner's edit of it (PUT {memory})."""
         row = await her(request)
@@ -641,6 +686,8 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         Route(f"{her_path}/references/{{name}}", reference, methods=["GET", "DELETE"]),
         Route(f"{her_path}/memory", memory, methods=["GET", "PUT"]),
         Route(f"{her_path}/memory/imports", memory_imports, methods=["POST", "DELETE"]),
+        Route("/api/owner/photos", owner_photos, methods=["GET", "POST"]),
+        Route("/api/owner/photos/{name}", owner_photo, methods=["GET", "DELETE"]),
         Route("/api/voices/{voice}/sample", voice_sample),
         Route("/api/chats/{chat_id:int}", chat, methods=["GET", "PATCH", "DELETE"]),
         Route("/api/chats/{chat_id:int}/messages", messages),

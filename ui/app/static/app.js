@@ -1366,6 +1366,34 @@ async function loadReferences(note) {
     : "More pictures of her keep her face the same from other sides. Each one makes a picture a little slower.");
 }
 
+// Photos of the owner's face, for face recognition in the photos they send her.
+async function loadOwnerPhotos(note) {
+  const reply = await fetch("/api/owner/photos").catch(() => null);
+  if (!reply?.ok) return;
+  const { photos, max } = await reply.json();
+  $("owner-photos").replaceChildren(...photos.map((photo) => {
+    const item = document.createElement("li");
+    const image = picture(photo.url);
+    image.className = "";
+    image.alt = "A photo of you";
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", "Remove this photo");
+    remove.addEventListener("click", async () => {
+      if (!confirm("Stop using this photo of you?")) return;
+      await fetch(photo.url, { method: "DELETE" });
+      loadOwnerPhotos();
+    });
+    item.append(image, remove);
+    return item;
+  }));
+  $("owner-photos-add").hidden = photos.length >= max;
+  $("owner-photos-note").textContent = note || (photos.length
+    ? `${photos.length} of ${max}. She knows your face in the photos you send.${photos.length < 3 ? " 3 or more, from different sides, work best." : ""}`
+    : "Photos of your face, so she knows you in the photos you send. Add 3 to 5, clear, from the front and a little to each side.");
+}
+
 async function loadStatus() {
   const reply = await fetch("/api/status").catch(() => null);
   if (!reply?.ok) return;
@@ -1401,7 +1429,18 @@ function wire() {
   });
 
   const menu = $("menu");
-  const openMenu = () => { loadStatus(); loadReferences(); showApps(); menu.showModal(); };
+  const openMenu = () => { loadStatus(); loadReferences(); loadOwnerPhotos(); showApps(); menu.showModal(); };
+  $("owner-photos-file").addEventListener("change", async () => {
+    const files = [...$("owner-photos-file").files];
+    if (!files.length) return;
+    const form = new FormData();
+    files.forEach((file) => form.append("photos", file));
+    $("owner-photos-note").textContent = "Looking for your face…";
+    const reply = await fetch("/api/owner/photos", { method: "POST", body: form });
+    const answer = await reply.json().catch(() => ({}));
+    $("owner-photos-file").value = "";
+    loadOwnerPhotos(reply.ok ? answer.note || "" : answer.error || "Those photos could not be saved.");
+  });
   $("references-file").addEventListener("change", async () => {
     const files = [...$("references-file").files];
     if (!files.length) return;

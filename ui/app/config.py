@@ -31,6 +31,12 @@ class SociaConfig:
     # When the vision model answers about photos: the messages it reads, the photos and pictures it
     # sees (newest first), and their longer side; it reads about one token per 32 x 32 pixels.
     PHOTO_HISTORY_MESSAGES: ClassVar[int] = 16
+    # Face prints at least this similar are the same person: her pictures scored 0.60-0.88 against her
+    # others, women drawn to look like her 0.30-0.52 (model_evaluations/self_recognition.py).
+    FACE_MATCH: ClassVar[float] = 0.55
+    # Faces named for one picture, largest first; and photos of the owner's face kept.
+    FACES_NAMED: ClassVar[int] = 4
+    MAX_OWNER_PHOTOS: ClassVar[int] = 5
     PHOTOS_SEEN: ClassVar[int] = 3
     PHOTO_SEEN_SIDE: ClassVar[int] = 1024
     # The longest one image may take, including loading the model from disk.
@@ -130,6 +136,15 @@ class SociaConfig:
     def profile_path(self, companion_id: int) -> Path:
         """Her profile picture: her face in every image she appears in."""
         return self.companion_dir(companion_id) / "profile.png"
+
+    @property
+    def owner_photos_dir(self) -> Path:
+        """Photos of the owner's face, so she knows them in the photos they send."""
+        return self.data_dir / "owner" / "photos"
+
+    def owner_photos(self) -> list[Path]:
+        folder = self.owner_photos_dir
+        return sorted(folder.glob("*.jpg"))[:self.MAX_OWNER_PHOTOS] if folder.is_dir() else []
 
     def references_dir(self, companion_id: int) -> Path:
         """More pictures of her, so her face stays the same at other angles and expressions."""

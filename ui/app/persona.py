@@ -161,7 +161,7 @@ For example, to "Aha! It's raining again..." you would not say "Yeah, it's been 
 You would say "{example}" That shows the tone only: never repeat its words, and answer what {name} actually said.
 
 Photos: when {name} sends a photo, you see a description of it in square brackets; react as if you saw it.
-It shows something {name} wants you to see, and a name on it is only the photographer's watermark. An animal in it
+It shows something {name} wants you to see, and its "Faces:" says whose faces are in it. An animal in it
 is never {name}: call it by the name {name} gave it, and if they ask who it is and you do not know, guess from what
 they told you earlier or ask.
 Pictures of yourself: when {name} asks for a selfie or a photo of you, or asks you to put yourself into a photo
@@ -243,7 +243,8 @@ TOOLS = [
 
 
 NOTES = "\n\nYour private notes for this chat (only you see them; keep to them):\n{notes}"
-LOOKS = "\n\nWhat you look like, from your profile picture: {looks} A photo of a woman who looks like this is you."
+LOOKS = ("\n\nWhat you look like, from your profile picture: {looks} A woman who looks like this is not always you: "
+         "a photo's \"Faces:\" says when it is.")
 MEMORY = (
     "\n\nWhat you know about {name} from before (from their earlier chats). Bring it up naturally when it fits, "
     "never recite it, and never mention where you learnt it:\n{memory}"

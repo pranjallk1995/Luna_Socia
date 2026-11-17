@@ -411,11 +411,11 @@ class ConversationTests(unittest.TestCase):
     def tearDown(self):
         self.folder.cleanup()
 
-    def run_turn(self, rounds, text="", photo=None, chat_id=None, her=None, completion=None, apps=None):
+    def run_turn(self, rounds, text="", photo=None, chat_id=None, her=None, completion=None, apps=None, faces=None):
         seen: dict = {"name": completion} if completion else {}
         ollama_transport, comfy_transport = fake_services(rounds, seen)
         conversation = Conversation(self.config, self.store, Ollama(self.config, ollama_transport),
-                                    ComfyUI(self.config, comfy_transport), apps)
+                                    ComfyUI(self.config, comfy_transport), apps, faces)
 
         async def collect():
             companion = self.store.companion((her or self.her)["id"])
@@ -656,6 +656,51 @@ class ConversationTests(unittest.TestCase):
         self.assertNotIn("unloaded", seen)
         self.assertNotIn("images", streamed(seen)[0]["messages"][-1])
 
+    def test_face_recognition_names_the_faces_the_vision_model_sees(self):
+        from app.faces import Match
+
+        class Faces:
+            asked = []
+
+            def who(self, picture, people):
+                self.asked.append(sorted(people))
+                return [Match("Luna", 0.81, "left"), Match(None, 0.41, "right")]
+
+        faces = Faces()
+        events, seen = self.run_turn([[{"content": "That's me with someone 👀"}]], text="who is this?",
+                                     photo=png("red"), faces=faces)
+        legend = streamed(seen)[0]["messages"][-1]["content"]
+        self.assertIn("2) the photo Pranjall sent just now with \"who is this?\". "
+                      "Faces: you, Luna (left); someone who is neither you nor Pranjall (right).", legend)
+        self.assertIn('Under each picture, "Faces:" says\nwhose faces are in it', streamed(seen)[0]["messages"][0]["content"])
+        self.assertEqual(faces.asked[0], ["Luna", "Pranjall"])
+        # Her later replies read the faces with the photo's description.
+        sent = next(m for m in self.store.messages if m["role"] == "user")
+        self.assertEqual(sent["photo_note"], "A red square. Faces: you, Luna (left); someone who is neither you nor Pranjall (right).")
+
+    def test_the_faces_line(self):
+        from app.faces import Match, faces_line
+
+        self.assertEqual(faces_line([], "Luna", "Pranjall"), "Faces: none visible, so whoever it is cannot be told from a face: say you cannot see their face.")
+        self.assertEqual(faces_line([Match("Pranjall", 0.7, "middle")], "Luna", "Pranjall"), "Faces: Pranjall.")
+        many = [Match(None, 0.2, "left")] * (SociaConfig.FACES_NAMED + 2)
+        self.assertTrue(faces_line(many, "Luna", "Pranjall").endswith("; and 2 more."))
+
+    def test_faces_are_aligned_and_kept_once_by_their_best_box(self):
+        import numpy as np
+
+        from app.faces import ARCFACE_POINTS, overlap_filter, place, similarity_transform
+
+        angle, scale, shift = 0.3, 2.5, np.array([40.0, -12.0])
+        rotation = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+        source = (ARCFACE_POINTS - shift) @ np.linalg.inv(scale * rotation).T
+        matrix = similarity_transform(source.astype(np.float32), ARCFACE_POINTS)
+        moved = source @ matrix[:, :2].T + matrix[:, 2]
+        self.assertTrue(np.allclose(moved, ARCFACE_POINTS, atol=1e-3))
+        boxes = np.array([[0, 0, 100, 100], [5, 5, 100, 100], [200, 200, 260, 260]], dtype=float)
+        self.assertEqual(overlap_filter(boxes, np.array([0.6, 0.9, 0.7]), 0.4), [1, 2])
+        self.assertEqual([place(b, 300) for b in boxes], ["left", "left", "right"])
+
     def test_which_messages_let_her_see_the_pictures(self):
         from app.chat import sees_pictures
 
@@ -696,7 +741,7 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(seen["unloaded"][-2:], [{"model": self.config.vision_model, "keep_alive": 0},
                                                  {"model": self.config.chat_model, "options": {"num_ctx": 8192}}])
         # She knows her own looks, read once from her profile picture.
-        self.assertIn("A photo of a woman who looks like this is you.", streamed(seen)[0]["messages"][0]["content"])
+        self.assertIn("A woman who looks like this is not always you", streamed(seen)[0]["messages"][0]["content"])
         self.assertEqual(self.profile.with_suffix(".txt").read_text(), "A red square.")
         # Their photo is <image1>, her profile <image2>; Ollama was emptied and ComfyUI freed after.
         encode = seen["graph"]["encode"]["inputs"]
@@ -797,8 +842,8 @@ class GateTests(unittest.TestCase):
         store = self.store = MemoryStore()
         cfg = cfg or config()
         self.voice = FakeVoice()
-        app = create_app(cfg, store, Conversation(cfg, store, None, None), None, self.voice, httpx.MockTransport(auth),
-                         reader=reader)
+        self.conversation = Conversation(cfg, store, None, None)
+        app = create_app(cfg, store, self.conversation, None, self.voice, httpx.MockTransport(auth), reader=reader)
         return TestClient(app, follow_redirects=False)
 
     def owner(self, cfg=None, reader=None):
@@ -871,6 +916,33 @@ class GateTests(unittest.TestCase):
         self.assertEqual(client.delete(f"/api/chats/{first['id']}").status_code, 404)
         self.assertEqual([c["id"] for c in client.get(f"/api/companions/{her['id']}/chats").json()["chats"]], [second["id"]])
         self.assertEqual(store.images, [])
+
+    def test_photos_of_the_owner_need_a_face_and_are_owner_only(self):
+        from app.faces import Face
+
+        class Faces:
+            def read(self, data):
+                # A red picture has a face, any other none.
+                from PIL import Image as Picture
+                red = Picture.open(io.BytesIO(data)).convert("RGB").getpixel((5, 5))[0] > 200
+                return ([Face((0, 0, 1, 1), 0.9, None)] if red else []), 64
+
+        with tempfile.TemporaryDirectory() as folder:
+            client = self.owner(config(Path(folder)))
+            self.conversation.faces = Faces()
+            self.assertEqual(client.get("/api/owner/photos").json()["photos"], [])
+            added = client.post("/api/owner/photos", files=[("photos", ("a.png", png("red"), "image/png")),
+                                                            ("photos", ("b.png", png("blue"), "image/png"))]).json()
+            self.assertEqual(len(added["photos"]), 1)
+            self.assertIn("1 of them had no face", added["note"])
+            url = added["photos"][0]["url"]
+            self.assertEqual(client.get(url).headers["content-type"], "image/jpeg")
+            self.assertEqual(client.get("/api/owner/photos/..%2F..%2Fprofile.png").status_code, 404)
+            too_many = [("photos", (f"{n}.png", png("red"), "image/png")) for n in range(SociaConfig.MAX_OWNER_PHOTOS)]
+            self.assertEqual(client.post("/api/owner/photos", files=too_many).status_code, 400)
+            self.assertEqual(client.delete(url).json(), {"deleted": True})
+            self.assertEqual(client.get("/api/owner/photos").json()["photos"], [])
+        self.assertEqual(self.client(None).get("/api/owner/photos").status_code, 401)
 
     def test_her_other_pictures_are_added_and_removed(self):
         with tempfile.TemporaryDirectory() as folder:

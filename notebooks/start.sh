@@ -18,7 +18,8 @@ docker build -q -t luna-socia-notebooks:local "$here" >/dev/null
 docker rm -f "$name" >/dev/null 2>&1 || true
 docker run -d --name "$name" --network luna_sentia_network --env-file "$here/.socia.env" \
   --gpus all --volumes-from luna_socia-ui-1:ro \
-  -v "$repo/ui/app:/workspace/ui/app:ro" -v "$here:/workspace/notebooks" \
+  -v "$repo/ui/app:/workspace/ui/app:ro" -v "$repo/model_evaluations:/workspace/model_evaluations:ro" \
+  -v "$here:/workspace/notebooks" \
   --user "$(id -u):$(id -g)" -e HOME=/tmp -e JUPYTER_TOKEN="$(cat "$here/.jupyter-token")" \
   -p 127.0.0.1:8888:8888 luna-socia-notebooks:local >/dev/null
 echo "Jupyter is at http://127.0.0.1:8888/lab?token=$(cat "$here/.jupyter-token")"

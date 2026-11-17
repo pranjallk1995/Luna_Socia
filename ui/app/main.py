@@ -11,6 +11,7 @@ import uvicorn
 from app.apps import LunaApps
 from app.chat import Conversation
 from app.config import SociaConfig
+from app.faces import Faces
 from app.images import ComfyUI
 from app.memory import MemoryReader
 from app.ollama import Ollama
@@ -55,7 +56,9 @@ def main() -> None:
     comfy = ComfyUI(config)
     ollama = Ollama(config)
     apps = LunaApps(config, store)
-    conversation = Conversation(config, store, ollama, comfy, apps)
+    faces = Faces(config)
+    threading.Thread(target=faces.preload, name="faces-preload", daemon=True).start()
+    conversation = Conversation(config, store, ollama, comfy, apps, faces)
     reader = MemoryReader(store, ollama, conversation.turn)
     voice = Voice(config)
     # Her voice loads and warms up beside the server starting, not on the first voice message.

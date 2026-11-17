@@ -22,7 +22,7 @@
 # | 1 | `normalized_photo` | your upload is turned upright, shrunk to 2048 px at most, saved as JPEG | |
 # | 2 | `sees_pictures` | does she look at pictures for this reply? Yes if your message has a photo, or asks about one sent in the last 4 messages | |
 # | 3 | `system_prompt` + `SEEING` | her persona, the time, her looks, what she remembers, her notes, and "right now you see the pictures themselves" | |
-# | 4 | `with_pictures` | her profile picture and the chat's last 3 photos or pictures go with your message, with a list of what each one is | |
+# | 4 | `with_pictures` + `faces_in` | her profile picture and the chat's last 3 photos or pictures go with your message, each with what it is and whose faces are in it (face recognition) | faces |
 # | 5 | `Ollama.chat(seeing=True)` | the **vision model** reads the last 16 messages and the pictures, and writes her reply. It takes the chat model's place on the GPU | vision 8B |
 # | 6 | after the reply | tool calls she typed out, a picture she asked for, a picture she only promised | |
 # | 7 | `Ollama.describe_photo` | while it is still loaded, the vision model writes 2–4 sentences about the photo (`PHOTO_PROMPT`), kept on your message | vision 8B |
@@ -48,7 +48,10 @@ store = SociaStore(config.database_url)
 # Socia's own Ollama client, with every request it makes kept in `recorder.calls`.
 recorder = Recorder()
 ollama = Ollama(config, transport=recorder)
-conversation = socia_chat.Conversation(config, store, ollama, None)
+from app.faces import Faces, faces_line
+
+faces = Faces(config)
+conversation = socia_chat.Conversation(config, store, ollama, None, faces=faces)
 
 print("chat model:  ", config.chat_model, "at", config.context_tokens, "tokens (stays on the GPU)")
 print("vision model:", config.vision_model, "at", config.vision_context_tokens, "tokens (only for photos)")
@@ -124,6 +127,31 @@ prompt = system_prompt(companion, NAME, message["created_at"], looks, notes) + s
 print(prompt)
 
 # %% [markdown]
+# ## Step 3½ · Whose faces are in the photo
+#
+# Face recognition (InsightFace buffalo_l): each face's box, how sure the detector is, and how close its
+# face print is to the closest of her pictures and of yours ("Photos of you"). 0.55 or more is the
+# same person (`FACE_MATCH`). The vision model is told this instead of judging faces itself.
+
+# %%
+from PIL import ImageDraw
+
+people = {companion["name"]: [config.profile_path(companion["id"]), *config.references(companion["id"])],
+          NAME: config.owner_photos()}
+async with watch(config, "Reading the faces"):
+    found, width = faces.read(photo)
+    matches = faces.who(photo, people)
+boxed = Image.open(io.BytesIO(photo)).convert("RGB")
+draw = ImageDraw.Draw(boxed)
+for face, match in zip(found, matches):
+    draw.rectangle(face.box, outline="lime" if match.name else "red", width=6)
+    print(f"{match.place}: {match.name or 'nobody known'}, similarity {match.similarity}, detector {face.score:.2f}")
+buffer = io.BytesIO(); boxed.save(buffer, "JPEG")
+thumb(buffer.getvalue(), 420, label="green: someone known, red: nobody known")
+print(faces_line(matches, companion["name"], NAME))
+print(f"Photos of you: {len(config.owner_photos())}")
+
+# %% [markdown]
 # ## Step 4 · The pictures she sees
 #
 # Her profile picture (so she knows her own face), then the chat's last 3 photos or pictures of hers,
@@ -132,7 +160,7 @@ print(prompt)
 
 # %%
 messages = [{"role": "system", "content": prompt}, *socia_chat.with_secret_nudge(socia_chat.model_messages(seen_rows), notes)]
-messages = conversation.with_pictures(messages, seen_rows, companion["id"], NAME)
+messages = conversation.with_pictures(messages, seen_rows, companion, NAME)
 import base64
 
 attached = [base64.b64decode(p) for p in messages[-1].get("images", [])]
@@ -202,6 +230,7 @@ if then and then.get("image_prompt"):
 print(PHOTO_PROMPT, "\n")
 async with watch(config, "Describing the photo"):
     note = await ollama.describe_photo(photo)
+note = f"{note} {conversation.faces_in(photo, companion, NAME)}".strip()
 print("now: ", note)
 print("then:", message["photo_note"])
 stats(recorder.calls[-1])

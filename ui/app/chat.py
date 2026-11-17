@@ -18,6 +18,7 @@ from PIL import Image, ImageOps
 
 from app.apps import APPS, DIRECT_SEPARATOR, LunaApps, app_tools_spec, apps_prompt, is_app_call
 from app.config import SociaConfig
+from app.faces import Faces, faces_line
 from app.images import ComfyUI
 from app.ollama import LOOKS_PROMPT, Ollama
 from app.persona import REACTIONS, TOOLS, clean_persona, image_prompt, system_prompt
@@ -55,8 +56,10 @@ SEEING = """
 
 Right now you see the pictures themselves: they are attached to {name}'s last message, in the order it lists. Look at
 them closely and answer from what you see: who is in them, faces, clothes, anything drawn or written on them, and how
-they differ. Your own face is the one in your profile picture, when it is attached. Earlier photos you know only from the
-descriptions in brackets."""
+they differ. Your own face is the one in your profile picture, when it is attached. Under each picture, "Faces:" says
+whose faces are in it, from face recognition: it is right, so go by it, not by how a face looks to you. A woman it does
+not call you is not you, however much she looks like you, and with no face visible you cannot tell who it is. Earlier
+photos you know only from the descriptions in brackets."""
 # Rounds of app use one reply may take: listing an app's tools, reading one, using it, and a retry.
 MAX_APP_ROUNDS = 5
 SECRET_NUDGE = ("[If you are the one to pick a secret here (the thing to guess, an answer), pick it now and call "
@@ -313,8 +316,10 @@ def ago(count: int) -> str:
 
 class Conversation:
     def __init__(self, config: SociaConfig, store: SociaStore, ollama: Ollama, comfy: ComfyUI,
-                 apps: LunaApps | None = None) -> None:
+                 apps: LunaApps | None = None, faces: Faces | None = None) -> None:
         self.config = config
+        # Face recognition, paired with the vision model: whose faces are in the pictures it sees.
+        self.faces = faces
         self.store = store
         self.ollama = ollama
         self.comfy = comfy
@@ -363,6 +368,9 @@ class Conversation:
                 except Exception as error:  # noqa: BLE001 - later replies go without it
                     logger.warning("Could not describe the photo: %s", error)
                     note = "(the photo did not load for you)"
+                people = await asyncio.to_thread(self.faces_in, photo, companion, name or "love")
+                if people:
+                    note = f"{note} {people}"
                 await asyncio.to_thread(self.store.set_photo_note, sent["id"], note)
             if self.saw:
                 # The vision model took the chat model's place on the GPU: swap back while the owner reads.
@@ -475,11 +483,27 @@ class Conversation:
         notes.write_text(looks)
         return looks
 
-    def with_pictures(self, messages: list[dict[str, Any]], rows: list[dict[str, Any]], companion_id: int,
+    def faces_in(self, picture: bytes, companion: dict[str, Any], name: str) -> str:
+        """Whose faces are in a picture, by face recognition: her (her profile picture and other pictures)
+        and the owner (their photos), or someone else; '' without face recognition."""
+        if self.faces is None:
+            return ""
+        her = companion["name"]
+        profile = self.config.profile_path(companion["id"])
+        people = {her: [profile, *self.config.references(companion["id"])] if profile.exists() else [],
+                  name: self.config.owner_photos()}
+        try:
+            return faces_line(self.faces.who(picture, people), her, name)
+        except Exception as error:  # noqa: BLE001 - the vision model looks without it
+            logger.warning("Could not read the faces: %s", error)
+            return ""
+
+    def with_pictures(self, messages: list[dict[str, Any]], rows: list[dict[str, Any]], companion: dict[str, Any],
                       name: str) -> list[dict[str, Any]]:
         """Her messages with the newest pictures of the chat (and her profile picture, so she knows her own
         face) attached to the owner's last message, and a list there of what each one is."""
         pictures, labels = [], []
+        companion_id = companion["id"]
         profile = self.config.profile_path(companion_id)
         if profile.exists():
             pictures.append(seen_size(profile.read_bytes(), SociaConfig.PHOTO_SEEN_SIDE // 2))
@@ -489,12 +513,15 @@ class Conversation:
             path = self.config.images_dir / row["image_file"]
             if not path.exists():
                 continue
-            pictures.append(seen_size(path.read_bytes(), SociaConfig.PHOTO_SEEN_SIDE))
+            data = path.read_bytes()
+            pictures.append(seen_size(data, SociaConfig.PHOTO_SEEN_SIDE))
             if row.get("image_kind") == "generated":
-                labels.append(f"the picture you sent of yourself {ago(back)}")
+                label = f"the picture you sent of yourself {ago(back)}"
             else:
                 said = " ".join((row["content"] or "").split())[:80]
-                labels.append(f"the photo {name} sent {ago(back)}" + (f' with "{said}"' if said else ""))
+                label = f"the photo {name} sent {ago(back)}" + (f' with "{said}"' if said else "")
+            people = self.faces_in(data, companion, name)
+            labels.append(f"{label}. {people}" if people else label)
         if not pictures:
             return messages
         listed = "; ".join(f"{number}) {label}" for number, label in enumerate(labels, start=1))
@@ -532,7 +559,7 @@ class Conversation:
                     prompt += CHOSEN_APP.format(name=name or "love", app=app.name, functions=functions)
         messages = [{"role": "system", "content": prompt}, *with_secret_nudge(model_messages(rows), notes)]
         if seeing:
-            messages = await asyncio.to_thread(self.with_pictures, messages, rows, companion["id"], name or "love")
+            messages = await asyncio.to_thread(self.with_pictures, messages, rows, companion, name or "love")
         text, calls, used_apps = "", [], []
         try:
             for _ in range(MAX_APP_ROUNDS + 1):
