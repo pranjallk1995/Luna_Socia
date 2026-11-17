@@ -441,6 +441,26 @@ function wireEditor() {
     const file = event.dataTransfer.files[0];
     if (file) setExport(file);
   });
+  $("memory-refresh").addEventListener("click", async () => {
+    // What she remembers changes while you chat (her remember tool): load it again.
+    if (!draft.her) return;
+    const box = $("her-memory");
+    if (box.value !== (draft.her.memory ?? "") && !confirm("Replace your unsaved edits with what she remembers now?")) return;
+    const button = $("memory-refresh");
+    button.disabled = true;
+    try {
+      const answer = await json(`${herApi(draft.her.id)}/memory`);
+      draft.her = { ...draft.her, memory: answer.memory, memory_progress: answer.progress };
+      box.value = answer.memory ?? "";
+      drawMemory(draft.her);
+      drawPreview();
+      editorError("");
+    } catch (error) {
+      editorError(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
   $("memory-forget").addEventListener("click", async () => {
     if (!draft.her || !confirm("Delete the chats you imported? What she already remembers stays until you edit it.")) return;
     try {

@@ -119,10 +119,13 @@
           <div class="sc-progress" role="progressbar" aria-label="Reading your chats" id="memory-bar"><i></i></div>
           <p class="sc-muted" id="memory-note"></p>
         </div>
-        <label class="sc-field" id="memory-field" hidden>
-          <span>What she remembers about you <em class="sc-muted">edit freely</em></span>
+        <div class="sc-field" id="memory-field" hidden>
+          <div class="sc-field-head">
+            <label for="her-memory">What she remembers about you <em class="sc-muted">edit freely</em></label>
+            <button class="sc-button sc-small" type="button" id="memory-refresh" title="Load what she remembers now, with facts she saved in chats since you opened this">Refresh</button>
+          </div>
           <textarea data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" id="her-memory" rows="8" placeholder="- they love filter coffee&#10;- their sister is called Asha"></textarea>
-        </label>
+        </div>
         <button class="sc-button sc-danger" type="button" id="memory-forget" hidden>Delete the imported chats</button>
       </fieldset>
 
