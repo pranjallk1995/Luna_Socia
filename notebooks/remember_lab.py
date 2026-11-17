@@ -14,6 +14,13 @@ Nothing here writes to her database.
 
 from __future__ import annotations
 
+import os
+
+# Socia's settings point HF_HOME at her model folder in /data, read-only in the notebooks' container: downloads
+# for training go to the training volume instead. Set before any Hugging Face library is imported.
+if not os.access(os.environ.get("HF_HOME") or "/nonexistent", os.W_OK):
+    os.environ["HF_HOME"] = "/training/hf"
+
 import csv
 import hashlib
 import io
