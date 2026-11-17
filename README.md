@@ -208,5 +208,5 @@ committed.
 ```bash
 docker compose build ui
 docker run --rm --network none --entrypoint python -v "$PWD/ui/tests:/workspace/ui/tests:ro" \
-  ghcr.io/pranjallk1995/luna-socia-ui:v0.8.0 -m unittest discover -s tests
+  ghcr.io/pranjallk1995/luna-socia-ui:v0.9.0 -m unittest discover -s tests
 ```
