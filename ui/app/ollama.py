@@ -90,6 +90,12 @@ class Ollama:
         reply.raise_for_status()
         return (reply.json().get("message") or {}).get("content", "").strip()
 
+    async def to_vision(self) -> None:
+        """Start loading the vision model at its context, so it swaps in while the pictures are got ready."""
+        reply = await self.client.post("/api/generate", json={
+            "model": self.config.vision_model, "options": {"num_ctx": self.config.vision_context_tokens}})
+        reply.raise_for_status()
+
     async def back_to_chat(self) -> None:
         """After she looked at photos: the vision model leaves the GPU and her chat model comes back,
         so her next text reply does not wait for the reload."""

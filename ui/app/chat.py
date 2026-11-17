@@ -418,6 +418,10 @@ class Conversation:
                 self.saw = False
             except Exception as error:  # noqa: BLE001 - her next reply loads it instead
                 logger.warning("Could not bring her chat model back: %s", error)
+            finally:
+                # The face models came with the vision model, and leave with it.
+                if self.faces is not None:
+                    await asyncio.to_thread(self.faces.unload)
 
     async def name_chat(self, chat_id: int, her: str, name: str = "You") -> dict[str, Any] | None:
         """A short name for a chat from its first messages, by the chat model; None if it gave none."""
@@ -559,7 +563,13 @@ class Conversation:
                     prompt += CHOSEN_APP.format(name=name or "love", app=app.name, functions=functions)
         messages = [{"role": "system", "content": prompt}, *with_secret_nudge(model_messages(rows), notes)]
         if seeing:
+            # The vision model swaps in while the face models load and read the pictures beside it.
+            swapping = asyncio.create_task(self.ollama.to_vision())
             messages = await asyncio.to_thread(self.with_pictures, messages, rows, companion, name or "love")
+            try:
+                await swapping
+            except Exception as error:  # noqa: BLE001 - the reply loads it instead
+                logger.warning("Could not start loading the vision model: %s", error)
         text, calls, used_apps = "", [], []
         try:
             for _ in range(MAX_APP_ROUNDS + 1):

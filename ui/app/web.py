@@ -504,6 +504,9 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
                         skipped += 1
                         continue
                 (folder / f"{time.time_ns()}-{uuid.uuid4().hex[:8]}.jpg").write_bytes(data)
+            if conversation.faces is not None and not conversation.saw:
+                # Loaded only to check these photos: off the GPU again unless she is looking at a photo.
+                await asyncio.to_thread(conversation.faces.unload)
             note = f"{skipped} of them had no face she could find, so they were not kept." if skipped else ""
             return JSONResponse(owner_photos_json(note))
         return JSONResponse(owner_photos_json())

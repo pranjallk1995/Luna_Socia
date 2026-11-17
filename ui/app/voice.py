@@ -18,7 +18,7 @@ import urllib.request
 from pathlib import Path
 
 from app.config import SociaConfig
-from app.model_usage import ModelUsage
+from app.model_usage import ModelUsage, measure_cuda_context, measuring
 
 KOKORO_RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 KOKORO_FILES = ("kokoro-v1.0.onnx", "voices-v1.0.bin")
@@ -130,10 +130,14 @@ class Voice:
         import numpy
 
         try:
-            with self.lock:
+            if self.on_gpu:
+                measure_cuda_context()
+            # Each one is measured as it loads and runs once: the monitor shows what it holds on the GPU.
+            with measuring(self.speaking), self.lock:
                 self._load_kokoro()
                 samples, rate = self.kokoro.create("Mm-hm, I'm here.", voice=self.config.tts_voice, speed=1.0,
                                                    lang="en-us")
+            with measuring(self.hearing), self.lock:
                 self._load_whisper()
                 speech = numpy.interp(numpy.arange(0, len(samples), rate / 16000), numpy.arange(len(samples)),
                                       samples).astype(numpy.float32)

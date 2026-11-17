@@ -661,10 +661,14 @@ class ConversationTests(unittest.TestCase):
 
         class Faces:
             asked = []
+            unloads = 0
 
             def who(self, picture, people):
                 self.asked.append(sorted(people))
                 return [Match("Luna", 0.81, "left"), Match(None, 0.41, "right")]
+
+            def unload(self):
+                self.unloads += 1
 
         faces = Faces()
         events, seen = self.run_turn([[{"content": "That's me with someone 👀"}]], text="who is this?",
@@ -674,6 +678,8 @@ class ConversationTests(unittest.TestCase):
                       "Faces: you, Luna (left); someone who is neither you nor Pranjall (right).", legend)
         self.assertIn('Under each picture, "Faces:" says\nwhose faces are in it', streamed(seen)[0]["messages"][0]["content"])
         self.assertEqual(faces.asked[0], ["Luna", "Pranjall"])
+        # The face models came with the vision model, and leave when her chat model is back.
+        self.assertEqual(faces.unloads, 1)
         # Her later replies read the faces with the photo's description.
         sent = next(m for m in self.store.messages if m["role"] == "user")
         self.assertEqual(sent["photo_note"], "A red square. Faces: you, Luna (left); someone who is neither you nor Pranjall (right).")
@@ -737,6 +743,8 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(sent["photo_note"], "A red square.")
         looks = [c for c in seen["completions"] if c["model"] == self.config.vision_model]
         self.assertEqual({c["options"]["num_ctx"] for c in looks}, {8192})
+        # The vision model starts loading first, while the pictures are got ready.
+        self.assertEqual(seen["unloaded"][0], {"model": self.config.vision_model, "options": {"num_ctx": 8192}})
         # Then the vision model leaves the GPU and her chat model comes back, before her next reply.
         self.assertEqual(seen["unloaded"][-2:], [{"model": self.config.vision_model, "keep_alive": 0},
                                                  {"model": self.config.chat_model, "options": {"num_ctx": 8192}}])
@@ -747,7 +755,7 @@ class ConversationTests(unittest.TestCase):
         encode = seen["graph"]["encode"]["inputs"]
         self.assertIn("<image2> into <image1>", encode["prompt"])
         self.assertEqual(seen["graph"]["ref1"]["inputs"]["image"], "ref1.png")
-        self.assertEqual(seen["unloaded"][0], {"model": "qwen3:14b", "keep_alive": 0})
+        self.assertIn({"model": "qwen3:14b", "keep_alive": 0}, seen["unloaded"])
         self.assertTrue(seen["freed"])
         saved = events[-2]["message"]
         self.assertEqual((saved["content"], saved["image_kind"]), ("Us! 🥰", "generated"))
@@ -921,6 +929,11 @@ class GateTests(unittest.TestCase):
         from app.faces import Face
 
         class Faces:
+            unloads = 0
+
+            def unload(self):
+                self.unloads += 1
+
             def read(self, data):
                 # A red picture has a face, any other none.
                 from PIL import Image as Picture

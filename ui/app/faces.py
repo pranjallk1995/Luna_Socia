@@ -12,6 +12,7 @@ weights are for non-commercial use only.
 
 from __future__ import annotations
 
+import gc
 import io
 import logging
 import threading
@@ -23,7 +24,7 @@ from pathlib import Path
 import numpy as np
 
 from app.config import SociaConfig
-from app.model_usage import ModelUsage
+from app.model_usage import ModelUsage, measure_cuda_context, measuring
 
 logger = logging.getLogger("socia")
 BUFFALO_URL = "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip"
@@ -95,7 +96,8 @@ class Faces:
         self.known_prints: dict[str, tuple[tuple, np.ndarray]] = {}
         self.device = ""
         self.usage = ModelUsage("InsightFace buffalo_l (SCRFD + ArcFace)", "Knows her face and yours in photos",
-                                lambda: (self.detector is not None, self.device or "loads at start"))
+                                lambda: (self.detector is not None, self.device if self.detector is not None
+                                         else "loads with the vision model, for a photo"))
 
     @property
     def folder(self) -> Path:
@@ -137,20 +139,38 @@ class Faces:
         self.device = "GPU (ONNX, CUDA)" if self.detector.get_providers()[0] == "CUDAExecutionProvider" else "CPU (ONNX)"
 
     def preload(self) -> None:
-        """Load both models and run each once: the first run in a process compiles CUDA's kernels for this GPU
-        (about 30 s, kept in CUDA_CACHE_PATH), which should not be the first photo's wait."""
+        """Download both models, load them and run each once, then let them go.
+
+        The first run in a process compiles CUDA's kernels for this GPU (about 30 s, kept in
+        CUDA_CACHE_PATH), which should not be the first photo's wait. They also measure their GPU memory
+        here. Afterwards they stay off the GPU until a photo turn loads them beside the vision model.
+        """
         try:
             import cv2
 
-            with self.lock:
-                self.load()
+            if self.config.voice_device == "cuda":
+                measure_cuda_context()
             blank = cv2.imencode(".jpg", np.full((256, 256, 3), 128, np.uint8))[1].tobytes()
-            self.read(blank)
-            aligned = np.zeros((1, 3, 112, 112), np.float32)
-            self.recognizer.run(None, {self.recognizer.get_inputs()[0].name: aligned})
-            logger.info("The face models are ready, on the %s", self.device)
+            with measuring(self.usage):
+                with self.lock:
+                    self.load()
+                self.read(blank)
+                with self.lock:
+                    aligned = np.zeros((1, 3, 112, 112), np.float32)
+                    self.recognizer.run(None, {self.recognizer.get_inputs()[0].name: aligned})
+            logger.info("The face models are ready, on the %s (%s MB); they load again for each photo",
+                        self.device, round(self.usage.vram_mb) if self.usage.vram_mb is not None else "?")
+            self.unload()
         except Exception:  # noqa: BLE001 - loaded on first use instead
             logger.exception("Could not load the face models at start")
+
+    def unload(self) -> None:
+        """Free their GPU memory, after a photo turn; the next photo loads them again (about a second)."""
+        with self.lock:
+            if self.detector is None:
+                return
+            self.detector = self.recognizer = None
+            gc.collect()
 
     # Finding and reading faces
 
