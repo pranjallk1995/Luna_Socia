@@ -185,6 +185,7 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
                              "default_voice": config.tts_voice if config.tts_voice in VOICE_IDS else VOICES[0]["id"],
                              "limits": {"name": SociaConfig.NAME_CHARS, "about": SociaConfig.ABOUT_CHARS,
                                         "memory": SociaConfig.MEMORY_CHARS, "references": SociaConfig.MAX_REFERENCES,
+                                        "photos": SociaConfig.PHOTOS_SEEN,
                                         "export_bytes": SociaConfig.MAX_EXPORT_BYTES}})
 
     async def companions(request: Request) -> Response:
@@ -320,8 +321,10 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
             return user
         form = await request.form(max_part_size=SociaConfig.MAX_UPLOAD_BYTES)
         text = str(form.get("text") or "").strip()
-        upload = form.get("photo")
-        photo = await upload.read() if upload is not None and hasattr(upload, "read") else None
+        uploads = [u for u in form.getlist("photo") if hasattr(u, "read")]
+        if len(uploads) > SociaConfig.PHOTOS_SEEN:
+            return JSONResponse({"error": f"Send {SociaConfig.PHOTOS_SEEN} photos at most at once."}, 400)
+        photo = [await upload.read() for upload in uploads]
         if not text and not photo:
             return JSONResponse({"error": "Say something or send a photo."}, 400)
         try:
@@ -345,7 +348,7 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
 
         async def reply() -> None:
             try:
-                async for event in conversation.send(row, chat_id, text, photo or None, first_name(user),
+                async for event in conversation.send(row, chat_id, text, photo or None, await owner_name(user),
                                                      str(form.get("timezone") or "")):
                     queue.put_nowait(event)
             except Exception as error:  # noqa: BLE001 - shown in the chat
@@ -399,15 +402,38 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
             data = await asyncio.to_thread(normalized_photo, await upload.read())
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
-            # A crop chosen for the old picture would cut the new one anywhere.
-            Avatar(path).reset()
-            # A new face needs its own confirmation that it is AI-generated before nude pictures.
-            persona = clean_persona({"nude_pictures": "off"}, row.get("persona"))
-            await asyncio.to_thread(store.update_companion, row["id"], {"persona": persona})
+            await new_profile(row, path)
             return JSONResponse({"saved": True})
         if not path.exists():
             return JSONResponse({"error": "She has no profile picture yet."}, 404)
         return FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+    async def new_profile(row: dict[str, Any], path: Path) -> None:
+        """What follows a new profile picture: her looks are read again from it on her next reply."""
+        # A crop chosen for the old picture would cut the new one anywhere.
+        Avatar(path).reset()
+        # A new face needs its own confirmation that it is AI-generated before nude pictures.
+        persona = clean_persona({"nude_pictures": "off"}, row.get("persona"))
+        await asyncio.to_thread(store.update_companion, row["id"], {"persona": persona})
+
+    async def reference_to_profile(request: Request) -> Response:
+        """One of her other pictures becomes her profile picture; the old profile picture takes its place."""
+        row = await her(request)
+        if isinstance(row, Response):
+            return row
+        name = request.path_params["name"]
+        chosen = config.references_dir(row["id"]) / name
+        if not REFERENCE_NAME.fullmatch(name) or not chosen.exists():
+            return JSONResponse({"error": "no such picture"}, 404)
+        profile = config.profile_path(row["id"])
+        data = chosen.read_bytes()
+        if profile.exists():
+            chosen.write_bytes(profile.read_bytes())
+        else:
+            chosen.unlink()
+        profile.write_bytes(data)
+        await new_profile(row, profile)
+        return JSONResponse({"saved": True})
 
     async def avatar(request: Request) -> Response:
         """Her round avatar, cut from the profile picture where the owner chose."""
@@ -475,6 +501,91 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
             path.unlink()
             return JSONResponse({"deleted": True})
         return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+    async def owner_name(user: dict[str, Any]) -> str:
+        """What she calls the owner: the name they chose, or their sign-in's first name."""
+        chosen = (await asyncio.to_thread(store.owner_profile)).get("name") or ""
+        return chosen or first_name(user)
+
+    async def me(request: Request) -> Response:
+        """The owner's details, as every girlfriend knows them: read, or changed (PUT)."""
+        user = await owner(request)
+        if isinstance(user, Response):
+            return user
+        if request.method == "PUT":
+            try:
+                body = await request.json()
+            except ValueError:
+                return JSONResponse({"error": "Send the details as JSON."}, 400)
+            name = " ".join(str(body.get("name") or "").split())[:SociaConfig.NAME_CHARS]
+            about = str(body.get("about") or "").strip()[:SociaConfig.ABOUT_CHARS]
+            await asyncio.to_thread(store.set_owner_profile, name, about)
+        profile = await asyncio.to_thread(store.owner_profile)
+        return JSONResponse({"name": profile.get("name") or "", "about": profile.get("about") or "",
+                             "signed_in_as": first_name(user), "called": profile.get("name") or first_name(user),
+                             "has_picture": config.owner_picture_path.exists(),
+                             "limits": {"name": SociaConfig.NAME_CHARS, "about": SociaConfig.ABOUT_CHARS}})
+
+    async def my_picture(request: Request) -> Response:
+        """The owner's profile picture: shown, changed (POST) or removed (DELETE)."""
+        user = await owner(request)
+        if isinstance(user, Response):
+            return user
+        path = config.owner_picture_path
+        if request.method == "POST":
+            form = await request.form(max_part_size=SociaConfig.MAX_UPLOAD_BYTES)
+            upload = form.get("photo")
+            if upload is None or not hasattr(upload, "read"):
+                return JSONResponse({"error": "Choose a picture."}, 400)
+            data = await asyncio.to_thread(normalized_photo, await upload.read())
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            Avatar(path).reset()
+            note = ""
+            faces = conversation.faces
+            if faces is not None:
+                found, _ = await asyncio.to_thread(faces.read, data)
+                if not conversation.saw:
+                    await asyncio.to_thread(faces.unload)
+                if not found:
+                    note = "She could not find a face in it, so she will not know you by it in photos."
+            return JSONResponse({"saved": True, **({"note": note} if note else {})})
+        if request.method == "DELETE":
+            path.unlink(missing_ok=True)
+            Avatar(path).reset()
+            return JSONResponse({"deleted": True})
+        if not path.exists():
+            return JSONResponse({"error": "No picture of you yet."}, 404)
+        return FileResponse(path, headers={"Cache-Control": "no-cache"})
+
+    async def my_avatar(request: Request) -> Response:
+        user = await owner(request)
+        if isinstance(user, Response):
+            return user
+        path = config.owner_picture_path
+        if not path.exists():
+            return JSONResponse({"error": "No picture of you yet."}, 404)
+        image = await asyncio.to_thread(Avatar(path).render)
+        return Response(image, media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+    async def my_avatar_crop(request: Request) -> Response:
+        """Where the owner's avatar is cut: read, chosen (PUT), or back to the default (DELETE)."""
+        user = await owner(request)
+        if isinstance(user, Response):
+            return user
+        path = config.owner_picture_path
+        if not path.exists():
+            return JSONResponse({"error": "No picture of you yet."}, 404)
+        avatar = Avatar(path)
+        if request.method == "PUT":
+            try:
+                body = await request.json()
+                return JSONResponse(await asyncio.to_thread(avatar.save, body))
+            except (ValueError, TypeError, KeyError):
+                return JSONResponse({"error": "A crop needs numbers x, y and zoom."}, 400)
+        if request.method == "DELETE":
+            await asyncio.to_thread(avatar.reset)
+        return JSONResponse(await asyncio.to_thread(avatar.crop))
 
     def owner_photos_json(note: str = "") -> dict[str, Any]:
         return {"photos": [{"name": path.name, "url": f"/api/owner/photos/{path.name}"} for path in config.owner_photos()],
@@ -672,6 +783,11 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
             reader.start()
         # Chats started before chats were named get a name, between her replies.
         naming = asyncio.create_task(conversation.name_old_chats())
+        # A picture cut short by a restart leaves ComfyUI holding the image model.
+        try:
+            await comfy.free()
+        except Exception as error:  # noqa: BLE001 - ComfyUI may not be up yet
+            logger.info("Could not ask ComfyUI to free its memory at start: %s", error)
         yield
         naming.cancel()
 
@@ -687,8 +803,13 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         Route(f"{her_path}/avatar/crop", avatar_crop, methods=["GET", "PUT", "DELETE"]),
         Route(f"{her_path}/references", references, methods=["GET", "POST"]),
         Route(f"{her_path}/references/{{name}}", reference, methods=["GET", "DELETE"]),
+        Route(f"{her_path}/references/{{name}}/profile", reference_to_profile, methods=["POST"]),
         Route(f"{her_path}/memory", memory, methods=["GET", "PUT"]),
         Route(f"{her_path}/memory/imports", memory_imports, methods=["POST", "DELETE"]),
+        Route("/api/owner", me, methods=["GET", "PUT"]),
+        Route("/api/owner/picture", my_picture, methods=["GET", "POST", "DELETE"]),
+        Route("/api/owner/avatar", my_avatar),
+        Route("/api/owner/avatar/crop", my_avatar_crop, methods=["GET", "PUT", "DELETE"]),
         Route("/api/owner/photos", owner_photos, methods=["GET", "POST"]),
         Route("/api/owner/photos/{name}", owner_photo, methods=["GET", "DELETE"]),
         Route("/api/voices/{voice}/sample", voice_sample),

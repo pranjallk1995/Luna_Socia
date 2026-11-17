@@ -151,6 +151,12 @@ How you text:
 - Private notes: whenever you pick a secret (the thing in a guessing game, a surprise), keep a score or agree on
   a plan, write it down at once by calling note. Your notes for this chat are shown to you below; {name} never
   sees them. Keep to them: in a game, every answer must be true of the secret you wrote down.
+- Memory: when {name} tells you something lasting about themselves or their life (people and pets and their names,
+  what tells their pets apart, where they live and work, plans and dates, likes and dislikes), or asks you to
+  remember something, call remember with one short fact about "they" ("Their cat Melon is a tabby with a green
+  collar"). When you tell {name} something new about yourself that should stay true (your favourite colour, your
+  past, your family), call remember with about "me" ("My favourite colour is lavender"): it goes into who you are,
+  so you say the same next time. Not for games or secrets: those go in note.
 - Games and long talks: keep track of everything said so far in this chat and build on it; in a guessing game,
   use every answer {name} already gave before asking or guessing again.
 - Reactions: you can react to {name}'s message with one emoji ({reactions}) by calling react, as people do on
@@ -228,6 +234,27 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "remember",
+            "description": ("Remember a lasting fact for every chat from now on: about them (a person or pet in their "
+                            "life and their name, what tells their pets apart, where they live or work, a plan or date, "
+                            "a like or dislike), or about yourself, something new you told them (a favourite, your past). "
+                            "Not for games or secrets (use note)."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fact": {"type": "string",
+                             "description": ("One short fact, such as \"Their cat Mini wears a name tag\", or about "
+                                             "yourself, \"My favourite colour is lavender\".")},
+                    "about": {"type": "string", "enum": ["them", "me"],
+                              "description": "\"them\" for a fact about them (the default), \"me\" for one about yourself."},
+                },
+                "required": ["fact"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "react",
             "description": "React to their last message with one emoji, shown on it, as on a phone.",
             "parameters": {
@@ -245,6 +272,7 @@ TOOLS = [
 NOTES = "\n\nYour private notes for this chat (only you see them; keep to them):\n{notes}"
 LOOKS = ("\n\nWhat you look like, from your profile picture: {looks} A woman who looks like this is not always you: "
          "a photo's \"Faces:\" says when it is.")
+ABOUT_OWNER = "\n\nWhat {name} wrote about themselves:\n{about}"
 MEMORY = (
     "\n\nWhat you know about {name} from before (from their earlier chats). Bring it up naturally when it fits, "
     "never recite it, and never mention where you learnt it:\n{memory}"
@@ -262,7 +290,7 @@ def example(persona: dict[str, str]) -> str:
 
 
 def system_prompt(
-    companion: dict[str, Any], name: str, now: datetime, looks: str = "", notes: str = ""
+    companion: dict[str, Any], name: str, now: datetime, looks: str = "", notes: str = "", owner_about: str = ""
 ) -> str:
     """Her system prompt: her persona, the time, her looks, what she remembers about {name},
     and her private notes for this chat."""
@@ -286,6 +314,8 @@ def system_prompt(
     )
     if looks.strip():
         prompt += LOOKS.format(looks=looks.strip())
+    if owner_about.strip():
+        prompt += ABOUT_OWNER.format(name=name, about=owner_about.strip())
     memory = str(companion.get("memory") or "").strip()
     if memory:
         prompt += MEMORY.format(name=name, memory=memory)

@@ -10,33 +10,48 @@ Later notebooks will hold the training and evaluation work. What to improve next
 | [01_photo_flow](01_photo_flow.py) | you send her a photo: the faces found in it and whose they are, the pictures the vision model sees, her prompt, her reply, the photo's note, the swap back to her chat model |
 | [02_picture_flow](02_picture_flow.py) | she takes a picture: her references, the image model's instruction, the ComfyUI graph, the latents |
 
-## Start
+## Start, in VS Code
 
-Luna Sentia and Luna Socia must be running.
+Luna Sentia and Luna Socia must be running. VS Code opens this repo inside a container beside
+Socia and runs the cells there. Nothing listens on a port, so there is no Jupyter server, address
+or token, and no browser.
+
+1. **Once:** install the **Dev Containers** extension (`ms-vscode-remote.remote-containers`) in
+   VS Code on Windows. The container installs Python, Jupyter and Jupytext into itself.
+2. Open this folder in VS Code (through WSL as usual), then run **Dev Containers: Reopen in
+   Container** from the command palette (or the prompt VS Code shows). The first time builds the
+   image, about a minute. `notebooks/start.sh prepare` runs first, by itself.
+3. Open a notebook:
+   - **As a notebook:** right-click `01_photo_flow.py`, choose **Open With… → Jupyter Notebook**,
+     pick the kernel **Python 3.12 (/usr/local/bin/python)**, and run cells with Shift+Enter.
+     Outputs show under each cell and are never saved into the `.py`.
+   - **Or as code:** open the `.py` and use **Run Cell** above each `# %%`. Outputs show in the
+     Interactive Window beside it.
+4. **Back to WSL:** **Dev Containers: Reopen Folder in WSL**. The container stops when VS Code
+   leaves it.
+
+Inside the container:
+
+- **Her code:** Socia's own image, with this repo at `/workspace`. A change you make to
+  `ui/app` is in the next cell after **Restart Kernel**, and in git as usual.
+- **Her settings and data:** read from the running Socia (`notebooks/.socia.env`, and her
+  `/data` read-only).
+- **The GPU:** the cells use it as Socia does. `watch(...)` prints what each step took.
+- **You:** files the notebooks write (in `results/`) belong to you, as anything else in WSL.
+
+**Without VS Code** (a model evaluation from the terminal):
 
 ```bash
-./notebooks/start.sh        # prints the address to open
+./notebooks/start.sh run    # the same container, in the background
+docker exec -w /workspace luna_socia-notebooks python model_evaluations/self_recognition.py <folder>
 ./notebooks/start.sh stop
 ```
-
-Jupyter runs in a container beside Socia:
-
-- **Her code:** Socia's own image, with this branch's `ui/app` mounted read-only. A change you
-  make to her code here is in the next cell after a kernel restart.
-- **Her settings and data:** read from the running Socia. Her pictures are read-only.
-- **The GPU:** its counters only. `watch(...)` prints what each step took.
-
-**In the browser:** open the address, then right-click a `.py` notebook and choose
-**Open With → Notebook**.
-
-**In VS Code:** open the `.py` file, choose **Select Kernel → Existing Jupyter Server**, and paste
-the address. Then run cells with **Run Cell**.
 
 ## What goes into git
 
 - **The notebooks:** kept as `.py` files ([jupytext](https://jupytext.readthedocs.io)), so a diff
   shows only code.
-- **Never:** the `.ipynb` copies with their outputs (your chats and her pictures), `results/`,
+- **Never:** outputs (your chats and her pictures), any `.ipynb` copy, `results/`,
   `ACTION_ITEMS.md`, and the settings `start.sh` writes. `.gitignore` keeps all of these out.
 
 ## Safe to run

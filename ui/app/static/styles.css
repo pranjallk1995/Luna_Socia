@@ -177,6 +177,15 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-who p { margin: 0; color: var(--lv-muted); font-size: var(--luna-text-small); }
 .sc-who p.sc-busy { color: var(--sc-good); }
 .sc-header-actions { display: flex; gap: 0.35rem; }
+/* You, at the top right: your picture, or your initial without one. */
+.sc-me {
+  display: grid; place-items: center; flex: none; width: 2.4rem; height: 2.4rem; padding: 0; overflow: hidden;
+  border: 1px solid var(--lv-border); border-radius: 50%; background: var(--lv-control); color: var(--lv-text);
+  cursor: pointer; font-weight: 600;
+}
+.sc-me:hover { border-color: var(--lv-strong); }
+.sc-me img { width: 100%; height: 100%; object-fit: cover; }
+
 
 .sc-icon {
   display: inline-grid; place-items: center; flex: 0 0 auto;
@@ -258,7 +267,8 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-row textarea:focus { outline: none; border-color: var(--lv-strong); }
 .sc-send { display: grid; place-items: center; width: 2.5rem; height: 2.5rem; flex: 0 0 auto; border: 0; border-radius: 50%; background: var(--lv-accent); color: #111; cursor: pointer; }
 .sc-send:disabled { opacity: 0.4; cursor: default; }
-.sc-attachment { position: relative; display: inline-block; margin: 0 0 0.5rem 3rem; }
+.sc-attachments { display: flex; flex-wrap: wrap; gap: 0.6rem; margin: 0 0 0.5rem 3rem; }
+.sc-attachment { position: relative; display: inline-block; }
 .sc-attachment img { display: block; height: 5rem; border-radius: 0.6rem; }
 .sc-attachment button { position: absolute; top: -0.5rem; right: -0.5rem; width: 1.5rem; height: 1.5rem; border-radius: 50%; border: 1px solid var(--lv-border); background: #222; cursor: pointer; line-height: 1; }
 
@@ -284,11 +294,21 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-crop-save { background: var(--lv-accent); color: #111; border-color: var(--lv-accent); }
 .sc-crop-save:hover { background: #ffffff; }
 .sc-dialog h3 { margin: 0.4rem 0 0; font-size: var(--luna-text-small); color: var(--lv-muted); font-weight: 600; }
+/* On a desktop: a wider panel, her pictures and your photos three to a row, and a larger crop. */
+@media (min-width: 900px) {
+  .sc-dialog { width: min(40rem, calc(100vw - 4rem)); }
+  .sc-dialog-body { padding: 1.5rem; }
+  .sc-dialog .sc-references { grid-template-columns: repeat(3, 1fr); gap: 0.6rem; }
+  .sc-dialog .sc-references button { width: 1.9rem; height: 1.9rem; font-size: 1rem; }
+  .sc-profile-large { max-height: 28rem; }
+  .sc-crop-stage { width: min(20rem, 100%); }
+}
 .sc-references { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; margin: 0; padding: 0; list-style: none; }
 .sc-references:empty { display: none; }
 .sc-references li { position: relative; }
 .sc-references img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 0.5rem; cursor: zoom-in; }
 .sc-references button { position: absolute; top: 0.2rem; right: 0.2rem; width: 1.5rem; height: 1.5rem; border-radius: 50%; border: 1px solid var(--lv-border); background: rgba(17, 17, 17, 0.8); cursor: pointer; line-height: 1; }
+.sc-references .sc-promote { right: auto; left: 0.2rem; color: var(--sc-gold, #e8c15a); }
 .sc-button { display: block; padding: 0.6rem 0.8rem; border: 1px solid var(--lv-border); border-radius: 0.7rem; background: var(--lv-control); text-align: center; cursor: pointer; color: var(--lv-text); text-decoration: none; }
 .sc-button:hover { background: var(--lv-control-hover); }
 .sc-danger { color: var(--sc-bad); }
@@ -315,14 +335,15 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-switch[aria-current="true"] { color: var(--lv-text); }
 .sc-switch[aria-current="true"] img, .sc-switch[aria-current="true"] i { border-color: var(--lv-accent); }
 .sc-switch span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sc-chat-list { flex: 1; overflow-y: auto; margin: 0; padding: 0; list-style: none; display: grid; align-content: start; gap: 0.2rem; }
-.sc-chat-item { display: flex; align-items: center; gap: 0.2rem; border-radius: 0.7rem; }
+/* One column as wide as the sidebar, never wider: a long preview is cut with "…" instead of scrolling sideways. */
+.sc-chat-list { flex: 1; overflow-x: hidden; overflow-y: auto; margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 0.2rem; }
+.sc-chat-item { display: flex; align-items: center; gap: 0.2rem; min-width: 0; border-radius: 0.7rem; }
 .sc-chat-item:hover, .sc-chat-item[aria-current="true"] { background: var(--lv-control); }
 .sc-chat-open { flex: 1; min-width: 0; padding: 0.55rem 0.7rem; border: 0; background: none; text-align: left; cursor: pointer; }
 .sc-chat-open strong, .sc-chat-open span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sc-chat-open strong { font-weight: 600; }
 .sc-chat-open span { color: var(--lv-muted); font-size: var(--luna-text-small); }
-.sc-chat-open small { display: block; color: var(--lv-muted); font-size: 0.72rem; letter-spacing: 0.01em; }
+.sc-chat-open small { display: block; overflow: hidden; color: var(--lv-muted); font-size: 0.72rem; letter-spacing: 0.01em; text-overflow: ellipsis; white-space: nowrap; }
 .sc-chat-item .sc-icon { width: 2rem; height: 2rem; opacity: 0; }
 .sc-chat-item:hover .sc-icon, .sc-chat-item:focus-within .sc-icon, .sc-chat-item[aria-current="true"] .sc-icon { opacity: 1; }
 @media (hover: none) { .sc-chat-item .sc-icon { opacity: 1; } }
@@ -339,8 +360,12 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-about-facts dt { color: var(--lv-muted); }
 .sc-about-facts dd { margin: 0; text-align: right; }
 
-.sc-lightbox { position: fixed; inset: 0; display: grid; place-items: center; padding: 1rem; background: rgba(0, 0, 0, 0.9); cursor: zoom-out; z-index: 10; }
-.sc-lightbox img { max-width: 100%; max-height: 100%; border-radius: 0.5rem; }
+/* The whole picture, however tall: it fits the screen above the Download button. */
+.sc-lightbox { position: fixed; inset: 0; display: grid; place-items: center; padding: 1rem 1rem 4.5rem; background: rgba(0, 0, 0, 0.9); cursor: zoom-out; z-index: 10; }
+.sc-lightbox img {
+  max-width: calc(100vw - 2rem); max-height: calc(100vh - 5.5rem); max-height: calc(100dvh - 5.5rem);
+  object-fit: contain; border-radius: 0.5rem;
+}
 
 /* Desktop: the chat list becomes a column, the form gets its preview beside it. */
 @media (min-width: 900px) {
@@ -387,6 +412,7 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-luna-app-on { color: var(--lv-text); }
 .sc-luna-app-on .sc-luna-app-text small { color: var(--lv-muted); }
 .sc-luna-app-on .sc-luna-app-state { border-color: var(--lv-accent); color: var(--lv-accent); }
+.sc-remembered { margin: 0.25rem 0 0; color: var(--lv-muted); font-size: var(--luna-text-small); font-style: italic; }
 .sc-used-apps { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.25rem; }
 .sc-used-app { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.1rem 0.5rem 0.1rem 0.25rem;
   border: 1px solid var(--lv-border); border-radius: 999px; background: var(--lv-control); color: var(--lv-muted); font-size: 0.7rem; }

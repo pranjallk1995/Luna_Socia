@@ -1,20 +1,34 @@
 # Luna Socia
 
-![Status: early prototype](https://img.shields.io/badge/Status-early_prototype-D73A49)
+![Docker required](https://img.shields.io/badge/Docker-required-2496ED?logo=docker&logoColor=white)
+![Docker Compose v2](https://img.shields.io/badge/Docker_Compose-v2-2496ED?logo=docker&logoColor=white)
+![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![Luna Sentia required](https://img.shields.io/badge/Luna_Sentia-required-111111?logo=ollama&logoColor=white)
+![PostgreSQL in Luna Sentia](https://img.shields.io/badge/PostgreSQL-in_Luna_Sentia-4169E1?logo=postgresql&logoColor=white)
+![NVIDIA GPU required](https://img.shields.io/badge/NVIDIA_GPU-required-76B900?logo=nvidia&logoColor=white)
+![Owner only](https://img.shields.io/badge/Access-owner_only-8A2BE2)
+![Status: v1.0](https://img.shields.io/badge/Status-v1.0-2EA043)
 
-> **Work in progress:** Luna Socia is an early prototype. Each girlfriend's voice still
-> comes from her persona prompt; her own fine-tuned model (trained on the chats imported
-> into her memory), links to the other Luna apps, and long-term memory of Socia's own chats
-> are next.
+<p align="center">
+  <img src="ui/app/static/logo.png" alt="Luna Socia" width="160">
+</p>
+
+## Text, talk and share photos with your AI girlfriends
+
+> Luna Socia is a local-first, private chat with the AI girlfriends you create: text, voice
+> messages, photos, and pictures of her. Everything runs on your own machine, for the owner only.
+
+You create each girlfriend: her name, her face, how she texts, her voice, and what she
+remembers about you. She answers by text and, if you like, aloud; she looks at the photos you
+send and knows whose faces are in them; she takes pictures of herself, or steps into yours;
+and she can use your other Luna apps for you, from playing a song to dimming the lights.
+Socia is one service (`ui`): the page and its API, behind Luna's single sign-on.
 
 > **Requires Luna Sentia, running and healthy:** Socia's chat, vision and image models
 > run in [Luna Sentia](https://github.com/pranjallk1995/Luna_Sentia), and its data is in
-> Sentia's PostgreSQL. Start Sentia first, as described under [Start](#start).
+> Sentia's PostgreSQL. Start Sentia first, as described under [Quickstart](#quickstart).
 
-The owner's private chats with their AI girlfriends: text, voice messages, photos, and
-pictures of her. The page opens on the girlfriends to choose from, with a card to create a
-new one. Socia is one service (`ui`): the page and its API, behind Luna's single sign-on,
-for the owner only. Its models run in Luna Sentia, which every Luna app shares.
+## Models
 
 | Part | Model | Where it runs | Before changing it |
 | --- | --- | --- | --- |
@@ -24,50 +38,71 @@ for the owner only. Its models run in Luna Sentia, which every Luna app shares.
 | Pictures of Luna | Qwen-Image 2.1 Turbo, 8 steps; her profile picture and up to 4 other pictures of her are the face references | Sentia's ComfyUI, on the GPU | A few pictures by hand |
 | Voice messages | faster-whisper `LUNASOCIA_STT_MODEL` (default `large-v3-turbo`, int8/float16) | Here, on the GPU (`LUNASOCIA_VOICE_DEVICE`, default `cuda`; `cpu` to keep it off the GPU), loaded at start | A few voice messages by hand |
 | Her voice | Kokoro 82M, in the voice chosen for her (16 female English and Hindi voices; `LUNASOCIA_TTS_VOICE`, default `af_heart`, for new girlfriends) | Here, on the GPU with Whisper (about 1.5 GB for both, and 0.2 GB for CUDA), loaded at start. Socia measures what each model takes as it loads and reports it to Sentia's monitor | Listen to a few replies |
-| Her memory | The chat model reads imported ChatGPT or Claude chats for facts about you, in the background | Sentia's Ollama, on the GPU, only while no reply is being written | Import a small export and read what she remembers |
+| Her memory | The chat model reads imported ChatGPT or Claude chats for facts about you, in the background; reading her own chats too is off until it is reliable (`LUNASOCIA_READ_CHATS=1`) | Sentia's Ollama, on the GPU, only while no reply is being written | `model_evaluations/remember.py`, then import a small export and read what she remembers |
 
-## Luna ecosystem
+## The models in Socia itself
+
+Her voice, both ways, and face recognition run inside Socia rather than in Sentia's Ollama.
+Whisper and Kokoro load when Socia starts and stay (about 1.5 GB of the GPU, and 0.2 GB for
+CUDA); the face models load beside the vision model for a photo and leave with it. Socia
+measures what each one takes as it loads and reports it at `GET /api/models`, so Sentia's
+model monitor shows them beside Ollama's. Set `LUNASOCIA_VOICE_DEVICE=cpu` to keep them off
+the GPU. The face models' weights are for non-commercial use only.
+
+## Who can use it
+
+Only the owner: Socia's page and API refuse everyone else, and Luna Unia shows its card to
+the owner only. Its models run on the home's one GPU, and she can act in every Luna app as you.
+
+## Architecture
+
+### Luna ecosystem
 
 ![Luna ecosystem architecture](docs/luna-ecosystem.svg)
 
-Socia is one service, with no MCP server of its own, on Luna Sentia's `luna_sentia_network`.
-It signs in through Sentia's `auth`, keeps its messages in Sentia's PostgreSQL (`lunasocia`),
-sends chat and photo calls through Sentia's model monitor to Ollama, and asks Sentia's
-ComfyUI for pictures. Once you connect them, it is also an MCP client of every Luna app and
-of Sentia (the green line): see [Her phone: your Luna apps](#her-phone-your-luna-apps). Luna
-Unia shows it to the owner only.
+<!-- luna-models:start -->
+**Which app uses which model.** All of them run on Luna Sentia, which keeps Socia's chat model on the GPU and lets the others visit; see its [Models](https://github.com/pranjallk1995/Luna_Sentia#models) and [Changing a model](https://github.com/pranjallk1995/Luna_Sentia#changing-a-model).
 
-## Girlfriends
+| Model | Served by | Used by | Before changing it |
+| --- | --- | --- | --- |
+| `qwen3-vl:8b-instruct` | Ollama | Lexia (`DOCUMENT_MODEL`), Visia (`VISION_MODEL`), Vibia (`CAPTION_MODEL`), Fiora (`OLLAMA_MODEL`) | `model_checks/check_model.py`, then Lexia's, Visia's and Vibia's `model_evaluations/` |
+| `huihui_ai/qwen3-abliterated:8b` (Qwen3 8B, uncensored) | Ollama, resident at `SENTIA_RESIDENT_CONTEXT` | Socia's chat (`LUNASOCIA_CHAT_MODEL`) | `model_checks/check_model.py --context 8192`, then Socia's `model_evaluations/` |
+| `huihui_ai/qwen3-vl-abliterated:8b-instruct` (Qwen3-VL 8B, uncensored) | Ollama, in the chat model's place while Luna looks at a photo | Socia's photo replies (`LUNASOCIA_VISION_MODEL`) | Socia's cat game, then a few photos by hand |
+| `qwen3-embedding:0.6b` | Ollama | Lexia's semantic search (`EMBEDDING_MODEL`) | Re-embed with Lexia's `reindex_semantic_search` |
+| Qwen-Image 2.1 Turbo | ComfyUI | Socia's pictures of Luna | A few pictures by hand |
+| SigLIP 2 (`google/siglip2-base-patch16-224`) | Visia itself, GPU only | Visia's meaning search | Pinned in Visia's image; `backfill_metadata` re-embeds |
+| CLAP (`laion/clap-htsat-unfused`) | Vibia itself, GPU or CPU | Vibia's listening and search | Pinned in Vibia's image; every track is heard again |
+| Docling (layout, tables, OCR) | Lexia itself, GPU or CPU | Lexia's page reading | Pinned in Lexia's image |
+| Whisper `large-v3-turbo`, Kokoro 82M | Socia itself, GPU (about 1.5 GB, and 0.2 GB for CUDA, loaded at start) or CPU | Socia's voice messages and Luna's voice (`LUNASOCIA_STT_MODEL`, `LUNASOCIA_TTS_VOICE`, `LUNASOCIA_VOICE_DEVICE`) | Listen to a few replies; downloaded on first use |
+| InsightFace `buffalo_l` (SCRFD, ArcFace) | Socia itself, GPU (about 0.4 GB, loaded with the vision model for a photo) or CPU | Whose faces are in a photo, Luna's or the owner's, told to her vision model | Socia's `model_evaluations/self_recognition.py`; non-commercial licence |
+<!-- luna-models:end -->
 
-Create one from the card on the landing page, and change her later with "Edit her":
+Every Luna app but Luna Socia is a React UI plus a FastMCP service on Luna Sentia's
+`luna_sentia_network`; Socia, the owner's chat with Luna, is one service with no MCP
+server of its own. Each app's data lives in Sentia's PostgreSQL, people sign in through Sentia's
+`auth`, and model calls go through Sentia's model monitor, which times each one, samples
+the GPU and keeps Socia's chat model resident, to its Ollama. Socia's pictures come from
+Sentia's ComfyUI, which takes turns with Ollama on the GPU. Visia's SigLIP 2, Vibia's CLAP
+and Lexia's Docling run inside those apps instead, each in a process that exits when idle.
+Orange lines are Visia image URLs that other apps use: food images for Vita, room images
+for Lumia, and cover art for Vibia. Grey dashed lines are planned: links into Fiora (tax
+details from Lexia, transaction image and icon URLs from Visia). Luna Unia is the one home
+for the other apps, on port 42069: it checks which Luna stacks are running and opens each
+one with the shared sign-in. The purple line is the mood and beats of the track Vibia
+plays, which Lumia's lights follow. The green line is Socia using every app's MCP tools,
+and Sentia's, as the owner: it signs in to them with OAuth like any MCP client, so Luna can
+play music, dim the lights or find a photo from the chat.
 
-- **Who she is:** her name, and anything you write about her (age, work, what she loves,
-  how you met), which goes into her persona.
-- **Her picture:** her profile picture is her face in every picture she takes. Crop her
-  avatar and add up to 4 more pictures of her from her chat's settings.
-- **Your face:** add up to 5 photos of yourself under "Photos of you" in a chat's settings
-  menu, so she knows you in the photos you send. Each must show a face; one face a photo,
-  straight on and turned a little, works best.
-- **How she texts:** one of five styles (playful, sweet, sassy, shy, calm), reply length,
-  how many emoji, and her language (yours, English, Hinglish, or Hindi in Devanagari).
-- **Her voice:** one of Kokoro's English and Hindi voices, each with a sample to play.
-  Messages in Devanagari are spoken with the Hindi phonemizer.
-- **Her memory:** upload the export ChatGPT or Claude emails you (the .zip, or the
-  `conversations.json` inside it). Socia keeps every conversation in `memory_sources`, then
-  the chat model reads your own messages in each one (not the assistant's) for lasting
-  facts, about 2 s a conversation, and merges them into a short list that goes into
-  every reply (up to 4,800 characters). Reading pauses while she answers you; the form shows
-  its progress, and you can edit what she remembers. Importing the same export again skips
-  the conversations she already has.
+| Component | Technology | Purpose |
+| --- | --- | --- |
+| Page and API (`luna-socia-ui`, `:18503`) | Starlette, plain HTML, CSS and JavaScript | The chat, her settings, "You", and the Luna apps; for the owner only |
+| Chat and photos | Sentia's Ollama, through its model monitor | Her replies (`LUNASOCIA_CHAT_MODEL`, resident) and what she sees (`LUNASOCIA_VISION_MODEL`) |
+| Pictures | Sentia's ComfyUI, Qwen-Image 2.1 Turbo | Pictures of her, her face from her profile picture |
+| Voice and faces | faster-whisper, Kokoro, InsightFace on ONNX Runtime, in Socia | Voice messages, her voice, whose faces are in a photo |
+| Her phone | MCP client of every Luna app and of Sentia | Using your Luna apps for you |
+| Storage | Sentia's PostgreSQL (`lunasocia`) and the `luna_socia_data` volume | Girlfriends, chats, memory; pictures, photos and models |
 
-Her persona and memory are prompt-only for now: a separate model per girlfriend would
-not fit on the GPU beside the resident chat model. The imported conversations stay in the
-database as the training data for her fine-tuned model later.
-
-Luna, from before there could be several, becomes the first girlfriend when Socia starts:
-her chats move to her, and her files to `/data/companions/<id>`.
-
-## How a turn works
+### How a turn works
 
 1. What you send is stored in the `lunasocia` database, in its chat: your first message in a
    new chat starts it and names it.
@@ -75,10 +110,10 @@ her chats move to her, and her files to `/data/companions/<id>`.
    remembers about you (`ui/app/memory.py`), and the last 40 messages of this chat. Her own
    looks, described once from her profile picture, are part of it.
    - **With a photo**, or a question about one from the last 4 messages ("which one is
-     better?", "what did I circle?"), the vision model answers instead. It sees her profile
-     picture (her own face), the chat's last 3 photos and pictures, and the last 16
-     messages. Under each picture, face recognition says whose faces are in it: hers, yours
-     (from "Photos of you" in the settings menu), or someone else's. The vision model goes
+     better?", "what did I circle?"), the vision model answers instead. It sees the chat's last
+     3 photos and pictures, and the last 16 messages; not her profile picture, which it took
+     for one of yours. Under each picture, face recognition says whose faces are in it: hers, yours
+     (from your picture and "Photos of you", at the top right), or someone else's. The vision model goes
      by that rather than by how a face looks: on its own it took 23 of 24 women drawn to look
      like her for herself, and with it none. It then describes your photo once, and her later replies, from the chat model,
      read that description in brackets. Right after, Socia swaps the chat model back onto the
@@ -96,6 +131,56 @@ the vision model in the chat model's place, and the chat model is back about 4 s
 picture takes about 40 s; her voice about 0.2 s per reply; a 30-second voice message about
 3 s to transcribe. At rest, her chat model and voice use about 8 GB of the GPU, and about
 10.5 GB while she looks at a photo.
+
+## Girlfriends
+
+Create one from the card on the landing page, and change her later with "Edit her":
+
+- **Who she is:** her name, and anything you write about her (age, work, what she loves,
+  how you met), which goes into her persona.
+- **Her picture:** her profile picture is her face in every picture she takes. Crop her
+  avatar and add up to 4 more pictures of her from her chat's settings.
+- **How she texts:** one of five styles (playful, sweet, sassy, shy, calm), reply length,
+  how many emoji, and her language (yours, English, Hinglish, or Hindi in Devanagari).
+- **Her voice:** one of Kokoro's English and Hindi voices, each with a sample to play.
+  Messages in Devanagari are spoken with the Hindi phonemizer.
+
+Luna, from before there could be several, becomes the first girlfriend when Socia starts:
+her chats move to her, and her files to `/data/companions/<id>`.
+
+### You
+
+Your picture at the top right, on every page, opens what every girlfriend knows about you:
+
+- **Your picture** and **what she calls you** (your sign-in's first name until you choose one).
+- **About you:** your age, work, what you love; every girlfriend reads it before she replies.
+- **Photos of you:** up to 5, so she knows you in the photos you send, with your picture too.
+  Each must show a face; one face a photo, straight on and turned a little, works best.
+
+### Her memory
+
+Upload the export ChatGPT or Claude emails you (the .zip, or the `conversations.json` inside
+it) in "Edit her". Socia keeps every conversation in `memory_sources`, then the chat model reads
+your own messages in each one (not the assistant's) for lasting facts, about 2 s a conversation,
+and merges them into a short list that goes into every reply (up to 4,800 characters). Reading
+pauses while she answers you; the form shows its progress, and you can edit what she
+remembers. Importing the same export again skips the conversations she already has.
+
+Reading her chats in Socia the same way is built but off (`LUNASOCIA_READ_CHATS=1` turns it
+on): on real chats it still took what photos showed for facts about you.
+`model_evaluations/remember.py` checks what she would remember before it is turned on.
+
+Her persona and memory are prompt-only for now: a separate model per girlfriend would not fit
+on the GPU beside the resident chat model. The imported conversations stay in the database as
+the training data for her fine-tuned model later.
+
+### In the chat
+
+Send text, a voice message (the microphone), or up to 3 photos at once: choose them with the
+photo button, or paste one with Ctrl+V. A photo shows straight away with how much of it has
+uploaded. On a desktop, the smiley beside it opens an emoji picker. React to a message with an
+emoji, or double-tap hers for a heart; she reacts to yours too. Each of her replies can be
+read aloud, and any picture downloaded.
 
 ## Her phone: your Luna apps
 
@@ -129,14 +214,12 @@ kept with the message (`messages.apps`).
 - She acts as you, with everything your connectors can do, including deleting. She uses an
   app only when you ask for something it does.
 
-## Start
+## Quickstart
 
-Clone Socia beside Luna Sentia and start it; no `.env` is needed. Sentia's defaults pull
-`huihui_ai/qwen3-abliterated:8b`, `huihui_ai/qwen3-vl-abliterated:8b-instruct` and the image
-model, and create the `lunasocia` role and database with the password `lunasocia-dev`, which
-is Socia's default too. Socia uses the GPU for her voice (`gpus: all`), like Sentia's Ollama.
+On one machine you need no `.env`. Clone Socia beside [Luna Sentia](https://github.com/pranjallk1995/Luna_Sentia),
+which runs its database, models, and sign-in, then start both:
 
-```bash
+```sh
 git clone https://github.com/pranjallk1995/Luna_Sentia.git
 git clone https://github.com/pranjallk1995/Luna_Socia.git
 ./Luna_Sentia/luna.sh start socia
@@ -144,35 +227,43 @@ git clone https://github.com/pranjallk1995/Luna_Socia.git
 
 `start` pulls the release images, starts Sentia and waits until it is healthy, then starts
 Socia. Once both are up, it deletes the images their new ones replaced. The first start also
-downloads the chat and image models, which takes a while. To run your local code instead, use
-`./Luna_Sentia/luna.sh start --build socia`; every option is in
+downloads the chat, vision and image models, which takes a while. Open
+<http://localhost:18503> and sign in as Sentia's owner with one click, then choose a
+girlfriend, or create one. To run your local code instead, use
+`./Luna_Sentia/luna.sh start --build socia`. Every option of `luna.sh` is in
 [Start everything](https://github.com/pranjallk1995/Luna_Sentia#start-everything).
-
-Open it at http://localhost:18503 and sign in as the owner. With a tunnel, copy
-`.env.example` to `.env`, set `UI_PUBLIC_URL`, and route that address to `127.0.0.1:18503`,
-under `SENTIA_AUTH_COOKIE_DOMAIN`, so the sign-in cookie reaches it. Choose a girlfriend, or create
-one: her profile picture becomes her face in every picture she takes.
 
 ## Releases
 
 Each release is on the [Releases page](https://github.com/pranjallk1995/Luna_Socia/releases), with what changed and how to
 upgrade. The `docker-compose.yaml` on `main` names the images of the latest release, so
 `git pull`, then `./Luna_Sentia/luna.sh start`, updates to it. When a release needs a newer
-Luna Sentia, its notes say so: upgrade Sentia first. Its 0.x releases are pre-releases: it is still taking shape, and a release can change how it works. The release of every Luna app is
+Luna Sentia, its notes say so: upgrade Sentia first. The release of every Luna app is
 listed in [Luna Sentia's Releases](https://github.com/pranjallk1995/Luna_Sentia#releases).
 
-## Data
+## Start
+
+Sentia's defaults pull `huihui_ai/qwen3-abliterated:8b`, `huihui_ai/qwen3-vl-abliterated:8b-instruct`
+and the image model, and create the `lunasocia` role and database with the password
+`lunasocia-dev`, which is Socia's default too. Socia uses the GPU for her voice and face
+recognition (`gpus: all`), like Sentia's Ollama.
+
+With a tunnel, copy `.env.example` to `.env`, set `UI_PUBLIC_URL`, and route that address to
+`127.0.0.1:18503`, under `SENTIA_AUTH_COOKIE_DOMAIN`, so the sign-in cookie reaches it. Every
+setting is described in `.env.example`.
+
+## Data model
 
 The `luna_socia_data` volume holds each girlfriend's profile picture and avatar crop
 (`/data/companions/<id>`) and her other pictures (`/data/companions/<id>/references`, added
-and removed in her settings), the owner's photos of themselves (`/data/owner/photos`, from
-"Photos of you"), the pictures and photos of the chats (`/data/images`), and the
+and removed in her settings), the owner's picture and photos of themselves (`/data/owner`, from
+"You" at the top right), the pictures and photos of the chats (`/data/images`), and the
 voice and face models, downloaded the first time they are used (`/data/models`), with CUDA's kernels
 for this GPU (`/data/models/cuda-cache`): the first start compiles them, in about 30 s.
 
 The database keeps each girlfriend (`companions`: persona, voice, memory), her chats (`chats`,
 with their `messages` and `images`), and the conversations imported into her memory
-(`memory_sources`), and its sign-in to your Luna apps (`apps_connection`). Every chat is kept, so her long-term memory can draw on all of them. On a
+(`memory_sources`), the owner's name and details (`owner_profile`), and its sign-in to your Luna apps (`apps_connection`). Every chat is kept, so her long-term memory can draw on all of them. On a
 desktop, her chats are listed beside the conversation, and on a wide screen her profile is on
 the other side; on a phone, open the list from the menu button at the top left. Start a new
 chat with the pencil, and rename or delete a chat from the list. Deleting a chat removes its
@@ -194,19 +285,21 @@ cats, then "who is this?"), run `model_evaluations/self_recognition.py` on photo
 of women drawn to look like her, and check that it fits beside her voice and face models when
 the chat model has left the GPU.
 
-## Notebooks
+## Development workflow
 
-[`notebooks/`](notebooks/README.md) runs Socia's code one step at a time in Jupyter, beside the
-running Socia, and shows every step's result: what the vision model is sent and answers, the
+### Notebooks
+
+[`notebooks/`](notebooks/README.md) runs Socia's code one step at a time in VS Code, in a container
+beside the running Socia (`.devcontainer/`, with no Jupyter server or port), and shows every step's result: what the vision model is sent and answers, the
 chat as each model reads it, the tokens, and the GPU while each step runs. `01_photo_flow`
 follows a photo to her reply, with the faces found in it and whose they are; `02_picture_flow` follows a picture from her call to ComfyUI.
-Start them with `./notebooks/start.sh`. Their outputs (your chats and her pictures) are never
+Open them with **Dev Containers: Reopen in Container**. Their outputs (your chats and her pictures) are never
 committed.
 
-## Tests
+### Tests
 
 ```bash
 docker compose build ui
 docker run --rm --network none --entrypoint python -v "$PWD/ui/tests:/workspace/ui/tests:ro" \
-  ghcr.io/pranjallk1995/luna-socia-ui:v0.9.1 -m unittest discover -s tests
+  ghcr.io/pranjallk1995/luna-socia-ui:v1.0.0 -m unittest discover -s tests
 ```

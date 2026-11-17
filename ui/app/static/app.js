@@ -978,9 +978,14 @@ function handle(event, reply) {
       reply.developing?.remove();
       break;
     }
+    case "remembered":
+      // What she saved for every chat: shown under her reply, so you know she will remember it.
+      reply.remembered = element("p", { className: "sc-remembered", textContent: `Remembered: ${event.facts.join(" · ")}` });
+      break;
     case "done": {
       const finished = messageElement(event.message);
       reply.element.querySelectorAll(".sc-error").forEach((error) => finished.append(error));
+      if (reply.remembered) finished.append(reply.remembered);
       reply.element.replaceWith(finished);
       if (state.voice && event.message.content) speak(event.message.id);
       break;
@@ -991,7 +996,7 @@ function handle(event, reply) {
 
 async function send(words) {
   const message = (words ?? text.value).trim();
-  if (state.sending || !state.her || (!message && !state.photo)) return;
+  if (state.sending || !state.her || (!message && !state.photos.length)) return;
   state.sending = true;
   $("send").disabled = true;
   const form = new FormData();
@@ -999,8 +1004,8 @@ async function send(words) {
   form.append("companion_id", state.her.id);
   if (state.chat) form.append("chat_id", state.chat.id);
   form.append("timezone", Intl.DateTimeFormat().resolvedOptions().timeZone || "");
-  const photo = state.photo;
-  if (photo) form.append("photo", photo);
+  const photos = [...state.photos];
+  photos.forEach((photo) => form.append("photo", photo));
   text.value = "";
   resize();
   clearPhoto();
@@ -1008,7 +1013,7 @@ async function send(words) {
   const reply = replyElement();
   reply.element.remove();
   // A photo shows straight away, with how much of it has gone up.
-  reply.pending = photo ? pendingPhoto(photo, message) : null;
+  reply.pending = photos.length ? pendingPhoto(photos, message) : null;
   let buffer = "";
   const read = (piece) => {
     buffer += piece;
@@ -1030,7 +1035,7 @@ async function send(words) {
     if (reply.pending?.isConnected) {
       // It never arrived: the photo goes back into the composer to send again.
       reply.pending.remove();
-      restorePhoto(photo, message);
+      restorePhoto(photos, message);
     }
     if (!reply.element.isConnected) list.append(reply.element);
     handle({ type: "error", text: error.message }, reply);
@@ -1067,8 +1072,9 @@ function postStream(url, form, onUpload, onText) {
 }
 
 // Your photo in the chat while it uploads: a bar and how far it has got, then "saving" until the server has it.
-function pendingPhoto(file, words) {
-  const url = URL.createObjectURL(file);
+function pendingPhoto(files, words) {
+  const urls = files.map((file) => URL.createObjectURL(file));
+  const total = files.reduce((sum, file) => sum + file.size, 0);
   const bar = element("i");
   const label = element("span", { textContent: "Uploading…" });
   const upload = element("div", { className: "sc-upload" }, element("div", { className: "sc-upload-bar" }, bar), label);
@@ -1076,7 +1082,7 @@ function pendingPhoto(file, words) {
   upload.setAttribute("aria-valuemin", "0");
   upload.setAttribute("aria-valuemax", "100");
   const figure = element("div", { className: "sc-figure" },
-    element("img", { className: "sc-picture", src: url, alt: "Your photo, sending" }), upload);
+    ...urls.map((url) => element("img", { className: "sc-picture", src: url, alt: "Your photo, sending" })), upload);
   const node = element("div", { className: "sc-message sc-user sc-pending" }, figure,
     words ? element("div", { className: "sc-bubble-row" }, element("div", { className: "sc-bubble", textContent: words })) : null);
   list.append(node);
@@ -1086,10 +1092,10 @@ function pendingPhoto(file, words) {
     const percent = Math.round(fraction * 100);
     bar.style.width = `${percent}%`;
     upload.setAttribute("aria-valuenow", String(percent));
-    label.textContent = percent < 100 ? `Uploading ${percent}% of ${size(file.size)}` : "Saving…";
+    label.textContent = percent < 100 ? `Uploading ${percent}% of ${size(total)}` : "Saving…";
   };
   const remove = node.remove.bind(node);
-  node.remove = () => { URL.revokeObjectURL(url); remove(); };
+  node.remove = () => { urls.forEach((url) => URL.revokeObjectURL(url)); remove(); };
   return node;
 }
 
@@ -1097,10 +1103,9 @@ function size(bytes) {
   return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
-function restorePhoto(file, words) {
-  state.photo = file;
-  $("attachment-preview").src = URL.createObjectURL(file);
-  $("attachment").hidden = false;
+function restorePhoto(files, words) {
+  state.photos = files;
+  drawPhotos();
   if (words && !text.value) { text.value = words; resize(); }
 }
 
@@ -1183,10 +1188,34 @@ async function toggleRecording() {
 }
 
 // Photo to send.
+// Photos to send: up to as many as she sees at once, each shown with a button to take it out.
+const PHOTOS_AT_ONCE = 3;
+state.photos = [];
+
+function drawPhotos() {
+  const box = $("attachment");
+  [...box.querySelectorAll("img")].forEach((image) => URL.revokeObjectURL(image.src));
+  box.replaceChildren(...state.photos.map((file, index) => {
+    const remove = element("button", { type: "button", textContent: "×" });
+    remove.setAttribute("aria-label", "Remove this photo");
+    remove.addEventListener("click", () => { state.photos.splice(index, 1); drawPhotos(); });
+    return element("div", { className: "sc-attachment" },
+      element("img", { src: URL.createObjectURL(file), alt: "Photo to send" }), remove);
+  }));
+  box.hidden = !state.photos.length;
+}
+
+function addPhotos(files) {
+  const room = PHOTOS_AT_ONCE - state.photos.length;
+  state.photos.push(...files.slice(0, Math.max(room, 0)));
+  if (files.length > room) setPresence(`${PHOTOS_AT_ONCE} photos at most at once`);
+  drawPhotos();
+}
+
 function clearPhoto() {
-  state.photo = null;
+  state.photos = [];
   $("photo").value = "";
-  $("attachment").hidden = true;
+  drawPhotos();
 }
 
 // The message box grows with what you type, borders included, so it never shows a
@@ -1218,124 +1247,139 @@ async function loadProfile() {
     : `${her.name} has no profile picture yet. Add one: it becomes her face in every picture she takes.`;
 }
 
-// Her avatar's crop: the square's centre (x, y as fractions of the picture) and zoom
-// (1 = the largest square the picture holds). The server cuts the avatar from it.
-const crop = { width: 1, height: 1, x: 0.5, y: 0.5, zoom: 1, drag: null };
+// An avatar's crop: the square's centre (x, y as fractions of the picture) and zoom (1 = the largest
+// square the picture holds). The server cuts the avatar from it. One cropper each, for her and for you:
+// `prefix` names its elements (crop, crop-stage, crop-image, crop-zoom, crop-open, crop-cancel, crop-save,
+// crop-reset), `api` gives its crop's address and `picture` the picture's.
 const CROP_MAX_ZOOM = 6;
 
-function cropSide() {
-  return Math.min(crop.width, crop.height) / crop.zoom;
-}
+function cropper(prefix, { api, picture, note, saved, changed }) {
+  const crop = { width: 1, height: 1, x: 0.5, y: 0.5, zoom: 1, drag: null };
+  const el = (name) => $(name ? `${prefix}-${name}` : prefix);
+  const side = () => Math.min(crop.width, crop.height) / crop.zoom;
 
-function clampCrop() {
-  crop.zoom = Math.min(Math.max(crop.zoom, 1), CROP_MAX_ZOOM);
-  const side = cropSide();
-  const halfX = side / 2 / crop.width;
-  const halfY = side / 2 / crop.height;
-  crop.x = Math.min(Math.max(crop.x, halfX), 1 - halfX);
-  crop.y = Math.min(Math.max(crop.y, halfY), 1 - halfY);
-}
-
-// Place the picture so the crop's square fills the stage.
-function drawCrop() {
-  const stage = $("crop-stage");
-  const image = $("crop-image");
-  const side = cropSide();
-  const scale = stage.clientWidth / side;
-  image.style.width = `${crop.width * scale}px`;
-  image.style.height = `${crop.height * scale}px`;
-  image.style.left = `${-(crop.x * crop.width - side / 2) * scale}px`;
-  image.style.top = `${-(crop.y * crop.height - side / 2) * scale}px`;
-  $("crop-zoom").value = String(crop.zoom);
-}
-
-function takeCrop(answer) {
-  Object.assign(crop, { width: answer.width, height: answer.height, x: answer.x, y: answer.y, zoom: answer.zoom });
-  clampCrop();
-  drawCrop();
-}
-
-async function openCrop() {
-  const reply = await fetch(`${herApi()}/avatar/crop`).catch(() => null);
-  if (!reply?.ok) return;
-  const answer = await reply.json();
-  const image = $("crop-image");
-  image.onload = () => takeCrop(answer);
-  image.src = `${herApi()}/profile?t=${Date.now()}`;
-  $("crop").hidden = false;
-  $("crop-open").hidden = true;
-  $("crop-stage").focus();
-}
-
-function closeCrop() {
-  $("crop").hidden = true;
-  $("crop-open").hidden = false;
-}
-
-async function cropRequest(method, body) {
-  const reply = await fetch(`${herApi()}/avatar/crop`, {
-    method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined,
-  }).catch(() => null);
-  if (!reply?.ok) {
-    $("profile-note").textContent = "The crop could not be saved.";
-    return null;
+  function clamp() {
+    crop.zoom = Math.min(Math.max(crop.zoom, 1), CROP_MAX_ZOOM);
+    const halfX = side() / 2 / crop.width;
+    const halfY = side() / 2 / crop.height;
+    crop.x = Math.min(Math.max(crop.x, halfX), 1 - halfX);
+    crop.y = Math.min(Math.max(crop.y, halfY), 1 - halfY);
   }
-  $("avatar").src = `${herApi()}/avatar?t=${Date.now()}`;
-  return reply.json();
+
+  // Place the picture so the crop's square fills the stage.
+  function draw() {
+    const image = el("image");
+    const scale = el("stage").clientWidth / side();
+    image.style.width = `${crop.width * scale}px`;
+    image.style.height = `${crop.height * scale}px`;
+    image.style.left = `${-(crop.x * crop.width - side() / 2) * scale}px`;
+    image.style.top = `${-(crop.y * crop.height - side() / 2) * scale}px`;
+    el("zoom").value = String(crop.zoom);
+  }
+
+  function take(answer) {
+    Object.assign(crop, { width: answer.width, height: answer.height, x: answer.x, y: answer.y, zoom: answer.zoom });
+    clamp();
+    draw();
+  }
+
+  async function open() {
+    const reply = await fetch(api()).catch(() => null);
+    if (!reply?.ok) return;
+    const answer = await reply.json();
+    el("image").onload = () => take(answer);
+    el("image").src = `${picture()}?t=${Date.now()}`;
+    el().hidden = false;
+    el("open").hidden = true;
+    el("stage").focus();
+  }
+
+  function close() {
+    el().hidden = true;
+    el("open").hidden = false;
+  }
+
+  async function request(method, body) {
+    const reply = await fetch(api(), {
+      method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined,
+    }).catch(() => null);
+    if (!reply?.ok) {
+      $(note).textContent = "The crop could not be saved.";
+      return null;
+    }
+    changed();
+    return reply.json();
+  }
+
+  function wire() {
+    const stage = el("stage");
+    stage.addEventListener("pointerdown", (event) => {
+      stage.setPointerCapture(event.pointerId);
+      crop.drag = { pointer: event.pointerId, startX: event.clientX, startY: event.clientY, x: crop.x, y: crop.y };
+    });
+    stage.addEventListener("pointermove", (event) => {
+      if (!crop.drag || crop.drag.pointer !== event.pointerId) return;
+      const scale = stage.clientWidth / side();
+      crop.x = crop.drag.x - (event.clientX - crop.drag.startX) / scale / crop.width;
+      crop.y = crop.drag.y - (event.clientY - crop.drag.startY) / scale / crop.height;
+      clamp();
+      draw();
+    });
+    const endDrag = () => { crop.drag = null; };
+    stage.addEventListener("pointerup", endDrag);
+    stage.addEventListener("pointercancel", endDrag);
+    stage.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      crop.zoom *= Math.exp(-event.deltaY * 0.0015);
+      clamp();
+      draw();
+    }, { passive: false });
+    stage.addEventListener("keydown", (event) => {
+      const step = 0.02 / crop.zoom;
+      const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+      if (event.key === "+" || event.key === "=") crop.zoom *= 1.1;
+      else if (event.key === "-") crop.zoom /= 1.1;
+      else if (moves[event.key]) { crop.x += moves[event.key][0]; crop.y += moves[event.key][1]; }
+      else return;
+      event.preventDefault();
+      clamp();
+      draw();
+    });
+    el("zoom").addEventListener("input", () => {
+      crop.zoom = Number(el("zoom").value);
+      clamp();
+      draw();
+    });
+    el("open").addEventListener("click", open);
+    el("cancel").addEventListener("click", close);
+    el("save").addEventListener("click", async () => {
+      if (await request("PUT", { x: crop.x, y: crop.y, zoom: crop.zoom })) {
+        $(note).textContent = saved;
+        close();
+      }
+    });
+    el("reset").addEventListener("click", async () => {
+      const answer = await request("DELETE");
+      if (answer) take(answer);
+    });
+    window.addEventListener("resize", () => { if (!el().hidden) draw(); });
+  }
+
+  return { wire, close };
 }
+
+const herCrop = cropper("crop", {
+  api: () => `${herApi()}/avatar/crop`, picture: () => `${herApi()}/profile`, note: "profile-note",
+  saved: "Her avatar is updated.", changed: () => { $("avatar").src = `${herApi()}/avatar?t=${Date.now()}`; },
+});
+const myCrop = cropper("me-crop", {
+  api: () => "/api/owner/avatar/crop", picture: () => "/api/owner/picture", note: "me-note",
+  saved: "Your avatar is updated.", changed: () => loadMe(),
+});
 
 function wireCrop() {
-  const stage = $("crop-stage");
-  stage.addEventListener("pointerdown", (event) => {
-    stage.setPointerCapture(event.pointerId);
-    crop.drag = { pointer: event.pointerId, startX: event.clientX, startY: event.clientY, x: crop.x, y: crop.y };
-  });
-  stage.addEventListener("pointermove", (event) => {
-    if (!crop.drag || crop.drag.pointer !== event.pointerId) return;
-    const scale = stage.clientWidth / cropSide();
-    crop.x = crop.drag.x - (event.clientX - crop.drag.startX) / scale / crop.width;
-    crop.y = crop.drag.y - (event.clientY - crop.drag.startY) / scale / crop.height;
-    clampCrop();
-    drawCrop();
-  });
-  const endDrag = () => { crop.drag = null; };
-  stage.addEventListener("pointerup", endDrag);
-  stage.addEventListener("pointercancel", endDrag);
-  stage.addEventListener("wheel", (event) => {
-    event.preventDefault();
-    crop.zoom *= Math.exp(-event.deltaY * 0.0015);
-    clampCrop();
-    drawCrop();
-  }, { passive: false });
-  stage.addEventListener("keydown", (event) => {
-    const step = 0.02 / crop.zoom;
-    const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
-    if (event.key === "+" || event.key === "=") crop.zoom *= 1.1;
-    else if (event.key === "-") crop.zoom /= 1.1;
-    else if (moves[event.key]) { crop.x += moves[event.key][0]; crop.y += moves[event.key][1]; }
-    else return;
-    event.preventDefault();
-    clampCrop();
-    drawCrop();
-  });
-  $("crop-zoom").addEventListener("input", () => {
-    crop.zoom = Number($("crop-zoom").value);
-    clampCrop();
-    drawCrop();
-  });
-  $("crop-open").addEventListener("click", openCrop);
-  $("crop-cancel").addEventListener("click", closeCrop);
-  $("crop-save").addEventListener("click", async () => {
-    if (await cropRequest("PUT", { x: crop.x, y: crop.y, zoom: crop.zoom })) {
-      $("profile-note").textContent = "Her avatar is updated.";
-      closeCrop();
-    }
-  });
-  $("crop-reset").addEventListener("click", async () => {
-    const answer = await cropRequest("DELETE");
-    if (answer) takeCrop(answer);
-  });
-  window.addEventListener("resize", () => { if (!$("crop").hidden) drawCrop(); });
+  herCrop.wire();
+  myCrop.wire();
 }
 
 // Her other pictures, sent with her profile picture so her face stays the same.
@@ -1357,7 +1401,24 @@ async function loadReferences(note) {
       await fetch(reference.url, { method: "DELETE" });
       loadReferences();
     });
-    item.append(image, remove);
+    const promote = document.createElement("button");
+    promote.type = "button";
+    promote.className = "sc-promote";
+    promote.textContent = "★";
+    promote.title = "Make this her profile picture";
+    promote.setAttribute("aria-label", "Make this her profile picture");
+    promote.addEventListener("click", async () => {
+      if (!confirm("Make this her profile picture? Her current one becomes one of her other pictures. "
+        + "Nude pictures go off until you confirm her new face again.")) return;
+      const reply = await fetch(`${reference.url}/profile`, { method: "POST" }).catch(() => null);
+      $("profile-note").textContent = reply?.ok ? "Her profile picture is changed." : "That did not work.";
+      if (!reply?.ok) return;
+      loadProfile();
+      loadReferences();
+      state.companions = [];
+      drawSwitcher();
+    });
+    item.append(image, promote, remove);
     return item;
   }));
   $("references-add").hidden = references.length >= max;
@@ -1394,6 +1455,66 @@ async function loadOwnerPhotos(note) {
     : "Photos of your face, so she knows you in the photos you send. Add 3 to 5, clear, from the front and a little to each side.");
 }
 
+// You: your picture at the top right, the name she calls you, what you wrote about yourself, photos of you.
+async function loadMe(note) {
+  const reply = await fetch("/api/owner").catch(() => null);
+  if (!reply?.ok) return;
+  const me = await reply.json();
+  const stamp = Date.now();
+  document.querySelectorAll("[data-me]").forEach((button) => {
+    const image = button.querySelector("img");
+    image.hidden = !me.has_picture;
+    if (me.has_picture) image.src = `/api/owner/avatar?t=${stamp}`;
+    button.querySelector(".sc-me-initial").textContent = me.has_picture ? "" : (me.called || "You").slice(0, 1).toUpperCase();
+  });
+  $("me-picture").hidden = !me.has_picture;
+  if (me.has_picture) $("me-picture").src = `/api/owner/picture?t=${stamp}`;
+  $("me-picture-remove").hidden = !me.has_picture;
+  if (!me.has_picture) myCrop.close();
+  $("me-crop-open").hidden = !me.has_picture || !$("me-crop").hidden;
+  $("me-picture-label").textContent = me.has_picture ? "Change your picture" : "Add your picture";
+  $("me-name").value = me.name;
+  $("me-name").placeholder = me.signed_in_as || "Your name";
+  $("me-name").maxLength = me.limits.name;
+  $("me-about").value = me.about;
+  $("me-about").maxLength = me.limits.about;
+  if (note !== undefined) $("me-note").textContent = note;
+}
+
+function wireMe() {
+  const dialog = $("me");
+  document.querySelectorAll("[data-me]").forEach((button) => button.addEventListener("click", () => {
+    $("me-note").textContent = "";
+    loadMe();
+    loadOwnerPhotos();
+    dialog.showModal();
+  }));
+  $("me-save").addEventListener("click", async () => {
+    const reply = await fetch("/api/owner", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: $("me-name").value, about: $("me-about").value }),
+    }).catch(() => null);
+    loadMe(reply?.ok ? "Saved. She reads it from her next reply." : "That could not be saved.");
+  });
+  $("me-picture-file").addEventListener("change", async () => {
+    const file = $("me-picture-file").files[0];
+    if (!file) return;
+    const form = new FormData();
+    form.append("photo", file);
+    $("me-note").textContent = "Saving…";
+    myCrop.close();
+    const reply = await fetch("/api/owner/picture", { method: "POST", body: form }).catch(() => null);
+    const answer = await reply?.json().catch(() => ({})) || {};
+    $("me-picture-file").value = "";
+    loadMe(reply?.ok ? answer.note || "Saved." : answer.error || "That picture could not be saved.");
+  });
+  $("me-picture-remove").addEventListener("click", async () => {
+    if (!confirm("Remove your picture?")) return;
+    await fetch("/api/owner/picture", { method: "DELETE" }).catch(() => null);
+    loadMe("Removed.");
+  });
+}
+
 async function loadStatus() {
   const reply = await fetch("/api/status").catch(() => null);
   if (!reply?.ok) return;
@@ -1408,14 +1529,27 @@ function wire() {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); send(); }
   });
   $("photo").addEventListener("change", () => {
-    const file = $("photo").files[0];
-    if (!file) return;
-    state.photo = file;
-    $("attachment-preview").src = URL.createObjectURL(file);
-    $("attachment").hidden = false;
+    const files = [...$("photo").files];
+    $("photo").value = "";
+    if (!files.length) return;
+    addPhotos(files);
     text.focus();
   });
-  $("attachment-remove").addEventListener("click", clearPhoto);
+  // A picture pasted from the clipboard (a screenshot, an image copied from a page) joins the photos to
+  // send, like one chosen with the button. Text pasted with it still goes into the message box.
+  document.addEventListener("paste", (event) => {
+    if ($("chat").hidden || document.querySelector("dialog[open]")) return;
+    const pictures = [...(event.clipboardData?.items ?? [])]
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter(Boolean)
+      // Every clipboard picture is called image.png: give each its own name.
+      .map((file, i) => new File([file], `pasted-${Date.now()}-${i}.${file.type.split("/")[1] || "png"}`, { type: file.type }));
+    if (!pictures.length) return;
+    if (!event.clipboardData.getData("text/plain").trim()) event.preventDefault();
+    addPhotos(pictures);
+    text.focus();
+  });
   wireEmoji();
   $("mic").addEventListener("click", toggleRecording);
   $("older").addEventListener("click", () => loadMessages(state.oldest));
@@ -1429,7 +1563,7 @@ function wire() {
   });
 
   const menu = $("menu");
-  const openMenu = () => { loadStatus(); loadReferences(); loadOwnerPhotos(); showApps(); menu.showModal(); };
+  const openMenu = () => { loadStatus(); loadReferences(); showApps(); menu.showModal(); };
   $("owner-photos-file").addEventListener("change", async () => {
     const files = [...$("owner-photos-file").files];
     if (!files.length) return;
@@ -1547,5 +1681,7 @@ $("apps").addEventListener("click", toggleApps);
 $("apps-menu-toggle").addEventListener("click", toggleApps);
 
 wire();
+wireMe();
 route();
 showApps();
+loadMe();

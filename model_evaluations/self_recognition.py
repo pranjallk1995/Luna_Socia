@@ -83,7 +83,7 @@ async def main() -> None:
     for path, kind in photos(args.folder):
         data = path.read_bytes()
         # Face recognition's scores, against her pictures but the one this photo is.
-        people = {her["name"]: [p for p in her_pictures if p.name != same.get(path.name)], NAME: config.owner_photos()}
+        people = {her["name"]: [p for p in her_pictures if p.name != same.get(path.name)], NAME: config.owner_faces()}
         matches = faces.who(data, people)
         line = "" if args.no_faces else faces_line(matches, her["name"], NAME)
         seen = base64.b64encode(socia_chat.seen_size(data, SociaConfig.PHOTO_SEEN_SIDE)).decode()

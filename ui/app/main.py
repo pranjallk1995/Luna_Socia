@@ -59,7 +59,7 @@ def main() -> None:
     faces = Faces(config)
     threading.Thread(target=faces.preload, name="faces-preload", daemon=True).start()
     conversation = Conversation(config, store, ollama, comfy, apps, faces)
-    reader = MemoryReader(store, ollama, conversation.turn)
+    reader = MemoryReader(store, ollama, conversation.turn, config.read_chats)
     voice = Voice(config)
     # Her voice loads and warms up beside the server starting, not on the first voice message.
     threading.Thread(target=voice.preload, name="voice-preload", daemon=True).start()

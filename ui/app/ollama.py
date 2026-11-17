@@ -63,8 +63,13 @@ class Ollama:
                 if message.get("tool_calls"):
                     yield {"tool_calls": message["tool_calls"]}
 
+    # The longest answer complete() waits for: a fact list or a picture's description is far shorter. A model that
+    # loops otherwise writes until the request times out (5 minutes on 17 November), and her replies queue behind it.
+    COMPLETE_TOKENS = 700
+
     async def complete(self, prompt: str) -> str:
-        """One answer from the chat model, without streaming: for reading imported chats.
+        """One short answer from the chat model, without streaming: reading chats for facts, naming a chat,
+        choosing an app.
 
         It uses her context size, so Ollama keeps the resident model loaded instead of reloading it.
         """
@@ -73,7 +78,8 @@ class Ollama:
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
             "think": False,
-            "options": {"num_ctx": self.config.context_tokens, "temperature": 0.2},
+            "options": {"num_ctx": self.config.context_tokens, "temperature": 0.2,
+                        "num_predict": self.COMPLETE_TOKENS},
         })
         reply.raise_for_status()
         return (reply.json().get("message") or {}).get("content", "").strip()

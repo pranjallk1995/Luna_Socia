@@ -3,9 +3,10 @@
 *.ipynb
 .ipynb_checkpoints/
 results/
-# Socia's settings and the Jupyter token, written by start.sh.
+# Socia's settings, written by start.sh.
 .socia.env
-.jupyter-token
 __pycache__/
 # What to improve next, with evaluation results and what happened in your chats: on this machine only.
 ACTION_ITEMS.md
+# Deleted notebook files, kept by Jupyter until emptied.
+.Trash-*/

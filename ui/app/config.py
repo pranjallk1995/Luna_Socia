@@ -84,6 +84,9 @@ class SociaConfig:
     tts_voice: str = "af_heart"
     # Where her voice runs: "cuda" (the GPU, loaded at start and kept) or "cpu".
     voice_device: str = "cuda"
+    # Read her chats, once quiet, for lasting facts (LUNASOCIA_READ_CHATS=1). Off until it is reliable on real
+    # chats: on 17 November it filled her memory with what photos showed and gave her the owner's cats.
+    read_chats: bool = False
     data_dir: Path = Path("/data")
     # Shared with Luna Sentia (LUNASOCIA_API_TOKEN in both .env files), whose model monitor
     # asks GET /api/models about the voice models; blank lets only the owner's session ask.
@@ -121,6 +124,7 @@ class SociaConfig:
                                 if code.strip()),
             tts_voice=setting("LUNASOCIA_TTS_VOICE", cls.tts_voice),
             voice_device=setting("LUNASOCIA_VOICE_DEVICE", cls.voice_device).lower(),
+            read_chats=setting("LUNASOCIA_READ_CHATS", "") == "1",
             data_dir=Path(setting("LUNASOCIA_DATA_DIR", "/data")),
             api_token=os.getenv("LUNASOCIA_API_TOKEN", "").strip(),
         )
@@ -145,6 +149,16 @@ class SociaConfig:
     def owner_photos(self) -> list[Path]:
         folder = self.owner_photos_dir
         return sorted(folder.glob("*.jpg"))[:self.MAX_OWNER_PHOTOS] if folder.is_dir() else []
+
+    @property
+    def owner_picture_path(self) -> Path:
+        """The owner's own profile picture, shown at the top right."""
+        return self.data_dir / "owner" / "profile.png"
+
+    def owner_faces(self) -> list[Path]:
+        """Every picture of the owner face recognition knows them by: their profile picture and photos."""
+        picture = self.owner_picture_path
+        return [*([picture] if picture.exists() else []), *self.owner_photos()]
 
     def references_dir(self, companion_id: int) -> Path:
         """More pictures of her, so her face stays the same at other angles and expressions."""

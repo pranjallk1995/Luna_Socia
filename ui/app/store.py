@@ -128,6 +128,18 @@ CREATE TABLE IF NOT EXISTS apps_connection (
     access_expires DOUBLE PRECISION,
     connected_at TIMESTAMPTZ
 );
+-- Her own chats are read for lasting facts too, once quiet: 'socia' sources, and each chat's last message read.
+ALTER TABLE memory_sources DROP CONSTRAINT IF EXISTS memory_sources_source_check;
+ALTER TABLE memory_sources ADD CONSTRAINT memory_sources_source_check CHECK (source IN ('chatgpt', 'claude', 'socia'));
+ALTER TABLE chats ADD COLUMN IF NOT EXISTS remembered_to BIGINT NOT NULL DEFAULT 0;
+-- The owner as every girlfriend knows them: the name she calls them ('' for their sign-in's first
+-- name) and what they wrote about themselves. One row.
+CREATE TABLE IF NOT EXISTS owner_profile (
+    singleton BOOLEAN PRIMARY KEY DEFAULT true CHECK (singleton),
+    name TEXT NOT NULL DEFAULT '',
+    about TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 COMPANION_COLUMNS = """c.*, stats.chats, stats.last_active, mem.sources, mem.read"""
@@ -135,7 +147,7 @@ COMPANION_STATS = """
 LEFT JOIN LATERAL (SELECT count(*) AS chats, max(updated_at) AS last_active FROM chats
                    WHERE companion_id = c.id) stats ON true
 LEFT JOIN LATERAL (SELECT count(*) AS sources, count(facts) AS read FROM memory_sources
-                   WHERE companion_id = c.id) mem ON true"""
+                   WHERE companion_id = c.id AND source <> 'socia') mem ON true"""
 
 MESSAGE_COLUMNS = """m.id, m.chat_id, m.role, m.content, m.image_id, m.photo_note, m.reaction, m.apps, m.created_at,
                      i.kind AS image_kind, i.prompt AS image_prompt, i.file AS image_file"""
@@ -210,6 +222,83 @@ class SociaStore:
                      Jsonb(conversation["messages"]), conversation.get("started_at"))).fetchone()
                 added += row is not None
         return added
+
+    def quiet_chats(self, quiet_seconds: float) -> list[dict[str, Any]]:
+        """Chats with owner messages not yet read for her memory, quiet for ``quiet_seconds``, oldest first."""
+        with self.connect() as db:
+            return db.execute(
+                """SELECT c.id, c.companion_id, c.title, c.remembered_to FROM chats c
+                   WHERE EXISTS (SELECT 1 FROM messages m WHERE m.chat_id = c.id AND m.role = 'user'
+                                 AND m.id > c.remembered_to)
+                     AND (SELECT max(created_at) FROM messages m WHERE m.chat_id = c.id)
+                         < now() - make_interval(secs => %s)
+                   ORDER BY c.updated_at""", (quiet_seconds,)).fetchall()
+
+    def chat_source(self, chat: dict[str, Any], limit: int) -> int:
+        """The owner's messages after the last ones read, with what their photos showed, kept as a 'socia' source
+        to read for facts; the chat is marked read up to its last message. Returns how many messages."""
+        with self.connect() as db, db.transaction():
+            rows = db.execute(
+                "SELECT id, role, content, photo_note, created_at FROM messages WHERE chat_id = %s AND id > %s "
+                "ORDER BY id LIMIT %s", (chat["id"], chat["remembered_to"], limit)).fetchall()
+            if not rows:
+                return 0
+            # Both sides: the owner's words (with what their photos showed) and hers, for what she says of herself.
+            messages = [{"role": row["role"], "text": " ".join(part for part in [
+                row["content"] or "", f"[with a photo: {row['photo_note']}]" if row["photo_note"] else ""] if part)}
+                for row in rows if row["content"] or row["photo_note"]]
+            last = rows[-1]
+            if messages:
+                db.execute(
+                    "INSERT INTO memory_sources (companion_id, source, external_id, title, messages, started_at) "
+                    "VALUES (%s, 'socia', %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                    (chat["companion_id"], f"chat-{chat['id']}-{last['id']}", chat["title"] or "",
+                     Jsonb(messages), last["created_at"]))
+            db.execute("UPDATE chats SET remembered_to = %s WHERE id = %s", (last["id"], chat["id"]))
+            return len(messages)
+
+    def remember(self, companion_id: int, fact: str, limit: int) -> bool:
+        """A fact she chose to remember, added to her memory unless she has it; the oldest lines go past
+        ``limit``. False when she already had it."""
+        line = "- " + fact.removeprefix("- ").strip()
+        with self.connect() as db, db.transaction():
+            row = db.execute("SELECT memory FROM companions WHERE id = %s FOR UPDATE", (companion_id,)).fetchone()
+            if row is None:
+                return False
+            lines = [l for l in row["memory"].splitlines() if l.strip()]
+            if line.casefold() in (l.casefold() for l in lines):
+                return False
+            lines.append(line)
+            while len(lines) > 1 and len("\n".join(lines)) > limit:
+                lines.pop(0)
+            db.execute("UPDATE companions SET memory = %s, updated_at = now() WHERE id = %s",
+                       ("\n".join(lines), companion_id))
+            return True
+
+    def add_to_bio(self, companion_id: int, facts: list[str], limit: int) -> list[str]:
+        """What she said about herself, added to her bio (persona "about") as sentences, unless already there and
+        while it stays under ``limit``; the sentences added."""
+        with self.connect() as db, db.transaction():
+            row = db.execute("SELECT persona FROM companions WHERE id = %s FOR UPDATE", (companion_id,)).fetchone()
+            if row is None:
+                return []
+            about = str((row["persona"] or {}).get("about") or "").strip()
+            added = []
+            for fact in facts:
+                sentence = fact.removeprefix("- ").strip()
+                if not sentence:
+                    continue
+                sentence = sentence[0].upper() + sentence[1:]
+                if not sentence.endswith((".", "!", "?")):
+                    sentence += "."
+                if sentence.casefold() in about.casefold() or len(about) + len(sentence) + 1 > limit:
+                    continue
+                about = f"{about}\n{sentence}".strip()
+                added.append(sentence)
+            if added:
+                db.execute("UPDATE companions SET persona = persona || jsonb_build_object('about', %s::text), "
+                           "updated_at = now() WHERE id = %s", (about, companion_id))
+            return added
 
     def unread_source(self) -> dict[str, Any] | None:
         """The next imported conversation to read, of any girlfriend."""
@@ -384,6 +473,21 @@ class SociaStore:
         with self.connect() as db:
             return db.execute("SELECT * FROM images WHERE chat_id = %s AND kind = 'photo' ORDER BY id DESC LIMIT 1",
                               (chat_id,)).fetchone()
+
+    # The owner
+
+    def owner_profile(self) -> dict[str, Any]:
+        with self.connect() as db:
+            row = db.execute("SELECT name, about FROM owner_profile").fetchone()
+        return row or {"name": "", "about": ""}
+
+    def set_owner_profile(self, name: str, about: str) -> dict[str, Any]:
+        with self.connect() as db:
+            return db.execute(
+                """INSERT INTO owner_profile (name, about) VALUES (%s, %s)
+                   ON CONFLICT (singleton) DO UPDATE SET name = EXCLUDED.name, about = EXCLUDED.about,
+                     updated_at = now()
+                   RETURNING name, about""", (name, about)).fetchone()
 
     # The Luna apps
 

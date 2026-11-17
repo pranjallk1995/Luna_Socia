@@ -15,6 +15,7 @@ import asyncio
 import io
 import json
 import logging
+import re
 import zipfile
 from datetime import datetime, timezone
 from typing import Any
@@ -38,6 +39,42 @@ Write each fact as one short line starting with "- ", about "they". If there are
 
 Messages:
 {messages}"""
+
+CHAT_READ_PROMPT = """Below are messages a person wrote to {her}, their girlfriend, in one chat.
+List the lasting facts they reveal about themselves and their life: their name, people in their life, their pets
+(each pet's name, and what tells it apart in photos: its colour, markings, collar or tag), where they live and work,
+what they do, their plans and dates, likes and dislikes, habits, health, and what matters to them.
+Only write what they actually say or show: never guess. Write names exactly as they write them. Leave out:
+- anything about {her} herself, flirting and compliments, and games and their answers;
+- what they ate, did or felt today or tonight, greetings and goodnights, and questions they asked;
+- their own name, unless they tell it.
+Write each fact as one short line starting with "- ", about "they". If there are none, write only NONE.
+
+Messages:
+{messages}"""
+
+HER_READ_PROMPT = """{her} is a girlfriend in a chat. Her bio so far:
+{bio}
+
+Below are messages {her} wrote in one chat. List the lasting facts she states about herself that her bio does not
+already say: her favourites (colour, food, film, song, place), her past, family, friends, work, home, hobbies,
+habits, and what she likes or dislikes. Only what she states as true about herself:
+- not anything already in her bio, even in other words;
+- not what the person she talks to said about themselves, even when she agrees (they hate olives: that is theirs);
+- not flirting, not what she is doing, feeling or wearing right now, not plans for today or tomorrow, not a game's
+  secret, and nothing that goes against her bio.
+Write each fact as one short line starting with "- ", about "she" ("- Her favourite colour is lavender"). If there
+are none, write only NONE.
+
+Messages:
+{messages}"""
+
+VERIFY_PROMPT = """Here is what a person wrote to their girlfriend:
+{messages}
+
+Do the person's own words plainly say this about the person: "{fact}"?
+Answer NO if it is a guess, if it is about someone else (their girlfriend included), if it comes from a joke or a
+game, or if it is only true that day. Answer only YES or NO."""
 
 MERGE_PROMPT = """Below are notes about a person, gathered from many conversations, older ones first.
 Rewrite them as one list of the most important lasting facts about them, at most {lines} lines,
@@ -154,11 +191,12 @@ def parse_export(data: bytes) -> tuple[str, list[dict[str, Any]]]:
     return source, conversations
 
 
-def their_words(messages: list[dict[str, str]], limit: int = SociaConfig.MEMORY_READ_CHARS) -> str:
-    """What the owner wrote in one conversation, each message trimmed, up to ``limit`` characters."""
+def their_words(messages: list[dict[str, str]], limit: int = SociaConfig.MEMORY_READ_CHARS, role: str = "user") -> str:
+    """What the owner (or, with role "luna", she) wrote in one conversation, each message trimmed, up to ``limit``
+    characters."""
     lines, used = [], 0
     for message in messages:
-        if message["role"] != "user":
+        if message["role"] != role:
             continue
         text = " ".join(message["text"].split())[:800]
         if used + len(text) > limit:
@@ -166,6 +204,81 @@ def their_words(messages: list[dict[str, str]], limit: int = SociaConfig.MEMORY_
         lines.append(f"- {text}")
         used += len(text) + 3
     return "\n".join(lines)
+
+
+# Words that say nothing about which fact it is ("she loves", "her favourite").
+PLAIN_WORDS = {"she", "her", "hers", "they", "their", "them", "the", "and", "with", "for", "from", "has", "have", "had",
+               "was", "were", "are", "is", "likes", "like", "loves", "love", "enjoys", "enjoy", "favourite", "favorite",
+               "really", "very", "also", "always", "most", "best", "lot", "lots", "some", "this", "that", "these"}
+
+
+# Lines about the owner that hold only the moment: what they did tonight, how tired they are, a goodnight.
+PASSING = re.compile(r"\b(?:today|tonight|right now|this (?:morning|evening|week)|tired|good ?night|good ?morning|"
+                     r"says?\b|asks?\b|asked\b|their name is they)", re.IGNORECASE)
+
+
+# The owner's messages read at once: the model lists facts reliably from a short stretch, not a whole chat.
+CHAT_STRETCH = 30
+
+
+# Judgements of their character the model writes as facts from a girlfriend chat ("They have a habit of being
+# persistent", "They are looking for a romantic connection"): not things they said.
+JUDGEMENT = re.compile(r"\b(?:habit of|values?\b|valuing|looking for|preference for|interest in|tend to|tends to|"
+                       r"seems?|enjoys? being|like being|likes being|focused on)", re.IGNORECASE)
+
+
+async def facts_about_them(ask, her: str, messages: list[dict[str, str]]) -> list[str]:
+    """The lasting facts about the owner in what they wrote to her in a chat: their own words only (what their photos
+    showed made "facts" such as "They have a lamp"), CHAT_STRETCH messages at a time, each fact then checked against
+    their words with a yes or no."""
+    theirs = [{"role": "user", "text": re.sub(r"\s*\[with a photo: [^\]]*\]", "", m["text"]).strip()}
+              for m in messages if m["role"] == "user"]
+    theirs = [m for m in theirs if m["text"]]
+    facts: list[str] = []
+    for start in range(0, len(theirs), CHAT_STRETCH):
+        words = their_words(theirs[start:start + CHAT_STRETCH])
+        if not words:
+            continue
+        for fact in fact_lines(await ask(CHAT_READ_PROMPT.format(her=her, messages=words))):
+            if PASSING.search(fact) or JUDGEMENT.search(fact) or fact.casefold() in (f.casefold() for f in facts):
+                continue
+            answer = await ask(VERIFY_PROMPT.format(messages=words, fact=fact.removeprefix("- ")))
+            if answer.strip().upper().startswith("YES"):
+                facts.append(fact)
+    return facts
+
+
+# What may go into her bio: specific, lasting facts. The model also lists vague ones ("She likes to miss people")
+# however it is asked, so only these kinds are kept.
+LASTING = re.compile(
+    r"\b(?:favou?rites?|grew up|born|(?:is|comes) from|lives? in|sisters?|brothers?|mother|mom|mum|father|dad|parents|"
+    r"cousins?|best friend|friend named|dog|cat|pets?|works? (?:as|at|in)|job|stud(?:y|ies|ied)|college|school|"
+    r"allergic|hates|can'?t stand|named|called)\b", re.IGNORECASE)
+
+
+async def facts_about_her(ask, her: str, bio: str, messages: list[dict[str, str]]) -> list[str]:
+    """What she said about herself in a chat that her bio does not say yet: specific and lasting only, and never
+    a second favourite of a kind she has one of."""
+    words = their_words(messages, role="luna")
+    if not words:
+        return []
+    kept = []
+    for fact in fact_lines(await ask(HER_READ_PROMPT.format(her=her, bio=bio or "(empty)", messages=words))):
+        favourite = re.search(r"favou?rite ([a-z]+(?: [a-z]+)?) (?:is|are)\b", fact, re.IGNORECASE)
+        if favourite and re.search(rf"favou?rite {re.escape(favourite.group(1))}\b", f"{bio}\n" + "\n".join(kept),
+                                   re.IGNORECASE):
+            continue
+        if LASTING.search(fact) and not known(fact, bio):
+            kept.append(fact)
+    return kept
+
+
+def known(fact: str, text: str) -> bool:
+    """Whether ``text`` already says ``fact``: nearly all of its telling words are in it ("She loves baking" when
+    the bio says "She loves baking and her favourite is choco lava cake")."""
+    words = {w for w in re.findall(r"[a-z]{3,}", fact.casefold()) if w not in PLAIN_WORDS}
+    have = set(re.findall(r"[a-z]{3,}", text.casefold()))
+    return bool(words) and len(words & have) >= 0.75 * len(words)
 
 
 def fact_lines(text: str) -> list[str]:
@@ -181,12 +294,17 @@ def fact_lines(text: str) -> list[str]:
 class MemoryReader:
     """Reads imported chats in the background, one at a time, and keeps each girlfriend's memory."""
 
+    # Her chats are read once quiet for this long, so a conversation is read whole, not mid-way.
+    CHAT_QUIET_SECONDS = 600
+    # Messages of one chat read at once; the rest are read next time.
+    CHAT_MESSAGES = 200
     # Notes merged at once fit the model's context with room for the answer.
     MERGE_BATCH_CHARS = 14000
     MEMORY_LINES = 45
 
-    def __init__(self, store, ollama, turn: asyncio.Lock) -> None:
+    def __init__(self, store, ollama, turn: asyncio.Lock, read_chats: bool = True) -> None:
         self.store = store
+        self.read_chats = read_chats
         self.ollama = ollama
         self.turn = turn
         self.wake = asyncio.Event()
@@ -239,9 +357,14 @@ class MemoryReader:
         source = await asyncio.to_thread(self.store.unread_source)
         if source:
             self.busy = source["companion_id"]
-            words = their_words(source["messages"])
-            facts = fact_lines(await self.ask(READ_PROMPT.format(title=source["title"] or "untitled",
-                                                                 messages=words))) if words else []
+            if source["source"] == "socia":
+                her = await asyncio.to_thread(self.store.companion, source["companion_id"])
+                facts = await facts_about_them(self.ask, (her or {}).get("name") or "her", source["messages"])
+                await self.learn_about_her(source)
+            else:
+                words = their_words(source["messages"])
+                facts = fact_lines(await self.ask(READ_PROMPT.format(title=source["title"] or "untitled",
+                                                                     messages=words))) if words else []
             await asyncio.to_thread(self.store.set_source_facts, source["id"], "\n".join(facts))
             self.errors.pop(source["companion_id"], None)
             # Merged every so often, so her memory grows while a big export is read.
@@ -249,6 +372,10 @@ class MemoryReader:
             if sum(len(row["facts"]) for row in pending) >= self.MERGE_BATCH_CHARS:
                 await self.merge(source["companion_id"])
             return True
+        # Her chats, once quiet: the owner's new messages become a source like an imported chat.
+        for chat in (await asyncio.to_thread(self.store.quiet_chats, self.CHAT_QUIET_SECONDS) if self.read_chats else []):
+            if await asyncio.to_thread(self.store.chat_source, chat, self.CHAT_MESSAGES):
+                return True
         for companion in await asyncio.to_thread(self.store.companions):
             if await asyncio.to_thread(self.store.unmerged_facts, companion["id"]):
                 self.busy = companion["id"]
@@ -256,13 +383,31 @@ class MemoryReader:
                 return True
         return False
 
+    async def learn_about_her(self, source: dict[str, Any]) -> list[str]:
+        """What she said about herself in a chat (her favourite colour, her past), added to her bio so she says
+        the same next time."""
+        her = await asyncio.to_thread(self.store.companion, source["companion_id"])
+        if her is None:
+            return []
+        bio = str((her.get("persona") or {}).get("about") or "").strip()
+        facts = await facts_about_her(self.ask, her["name"], bio, source["messages"])
+        added = await asyncio.to_thread(self.store.add_to_bio, her["id"], facts, SociaConfig.ABOUT_CHARS)
+        if added:
+            logger.info("Added %d facts she told about herself to her bio", len(added))
+        return added
+
     async def merge(self, companion_id: int) -> None:
         """Fold newly read facts into her memory, keeping it under SociaConfig.MEMORY_CHARS."""
         companion = await asyncio.to_thread(self.store.companion, companion_id)
         rows = await asyncio.to_thread(self.store.unmerged_facts, companion_id)
         if companion is None or not rows:
             return
-        notes = "\n".join(line for line in [companion["memory"], *(row["facts"] for row in rows)] if line.strip())
+        lines, seen = [], set()
+        for line in "\n".join([companion["memory"], *(row["facts"] for row in rows)]).splitlines():
+            if line.strip() and line.strip().casefold() not in seen:
+                seen.add(line.strip().casefold())
+                lines.append(line.strip())
+        notes = "\n".join(lines)
         memory = await self.condense(notes)
         await asyncio.to_thread(self.store.merge_memory, companion_id, memory, [row["id"] for row in rows])
 

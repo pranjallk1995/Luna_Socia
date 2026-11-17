@@ -88,7 +88,13 @@ class ComfyUI:
                 return await asyncio.wait_for(self.result(prompt_id), SociaConfig.IMAGE_TIMEOUT_SECONDS)
             finally:
                 # Hand the GPU back to Ollama.
-                await self.client.post("/free", json={"unload_models": True, "free_memory": True})
+                await self.free()
+
+    async def free(self) -> None:
+        """Ask ComfyUI to let go of the image model: after each picture, and when Socia starts, in case a
+        restart cut a picture short (it then held 2.9 GB of the GPU and 12 GB of RAM, and Ollama took
+        minutes to load her vision model beside it)."""
+        await self.client.post("/free", json={"unload_models": True, "free_memory": True})
 
     async def result(self, prompt_id: str) -> bytes:
         while True:

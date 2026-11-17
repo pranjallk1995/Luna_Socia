@@ -1,0 +1,34 @@
+// The notebooks in VS Code, run inside a container beside the running Luna Socia: her image and
+// libraries, her settings and data (read-only), Sentia's network for her models, and the GPU.
+// No Jupyter server and no port: VS Code runs the cells itself. See notebooks/README.md.
+{
+  "name": "Luna Socia notebooks",
+  // On this machine, before the container starts: Socia's settings and the image (notebooks/start.sh).
+  "initializeCommand": "notebooks/start.sh prepare",
+  "image": "luna-socia-notebooks:local",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "workspaceFolder": "/workspace",
+  "runArgs": [
+    "--name", "luna_socia-notebooks",
+    "--network", "luna_sentia_network",
+    "--env-file", "${localWorkspaceFolder}/notebooks/.socia.env",
+    "--gpus", "all",
+    "--volumes-from", "luna_socia-ui-1:ro"
+  ],
+  "remoteUser": "luna",
+  "containerEnv": { "PYTHONPATH": "/workspace/ui:/workspace/notebooks" },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        // Opens the .py notebooks as notebooks; outputs are never saved into the .py.
+        "congyiwu.vscode-jupytext"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "jupyter.notebookFileRoot": "/workspace/notebooks"
+      }
+    }
+  }
+}

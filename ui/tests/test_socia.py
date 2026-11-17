@@ -14,9 +14,9 @@ import httpx
 from PIL import Image
 from starlette.testclient import TestClient
 
-from app.chat import (PICTURE_PROMISE, written_calls, clean_name, Conversation, model_messages, with_secret_nudge, without_written_pictures,
+from app.chat import (ASKS_FOR_PICTURE, PICTURE_PROMISE, written_calls, written_reactions, written_remembers, clean_name, Conversation, model_messages, with_secret_nudge, without_written_pictures,
                       written_notes, written_picture)
-from app.memory import ExportError, MemoryReader, fact_lines, parse_export, their_words
+from app.memory import ExportError, MemoryReader, fact_lines, facts_about_her, facts_about_them, parse_export, their_words
 from app.config import SociaConfig
 from app.images import ComfyUI, workflow
 from app.ollama import Ollama
@@ -49,6 +49,14 @@ class MemoryStore:
         self.images: list[dict] = []
         self.messages: list[dict] = []
         self.apps: dict | None = None
+        self.owner = {"name": "", "about": ""}
+
+    def owner_profile(self):
+        return dict(self.owner)
+
+    def set_owner_profile(self, name, about):
+        self.owner = {"name": name, "about": about}
+        return dict(self.owner)
 
     def apps_connection(self):
         return dict(self.apps) if self.apps else None
@@ -126,6 +134,49 @@ class MemoryStore:
         for source in self.sources:
             if source["id"] in source_ids:
                 source["merged"] = True
+
+    def quiet_chats(self, quiet_seconds):
+        return [{"id": c["id"], "companion_id": c["companion_id"], "title": c["title"],
+                 "remembered_to": c.get("remembered_to", 0)} for c in self.chats_
+                if any(m["chat_id"] == c["id"] and m["role"] == "user" and m["id"] > c.get("remembered_to", 0)
+                       for m in self.messages)]
+
+    def chat_source(self, chat, limit):
+        rows = [m for m in self.messages if m["chat_id"] == chat["id"] and m["id"] > chat["remembered_to"]][:limit]
+        if not rows:
+            return 0
+        messages = [{"role": m["role"], "text": " ".join(p for p in [m["content"] or "",
+                     f"[with a photo: {m['photo_note']}]" if m["photo_note"] else ""] if p)}
+                    for m in rows if m["content"] or m["photo_note"]]
+        if messages:
+            self.sources.append({"id": len(self.sources) + 1, "companion_id": chat["companion_id"], "source": "socia",
+                                 "external_id": f"chat-{chat['id']}-{rows[-1]['id']}", "title": chat["title"],
+                                 "messages": messages, "started_at": None, "facts": None, "merged": False})
+        next(c for c in self.chats_ if c["id"] == chat["id"])["remembered_to"] = rows[-1]["id"]
+        return len(messages)
+
+    def remember(self, companion_id, fact, limit):
+        her = next(c for c in self.companions_ if c["id"] == companion_id)
+        line = "- " + fact.removeprefix("- ").strip()
+        lines = [l for l in her["memory"].splitlines() if l.strip()]
+        if line.casefold() in (l.casefold() for l in lines):
+            return False
+        her["memory"] = "\n".join([*lines, line])
+        return True
+
+    def add_to_bio(self, companion_id, facts, limit):
+        her = next(c for c in self.companions_ if c["id"] == companion_id)
+        about, added = str(her["persona"].get("about") or "").strip(), []
+        for fact in facts:
+            sentence = fact.removeprefix("- ").strip()
+            sentence = sentence[0].upper() + sentence[1:] + ("" if sentence.endswith((".", "!", "?")) else ".")
+            if sentence.casefold() in about.casefold() or len(about) + len(sentence) + 1 > limit:
+                continue
+            about = f"{about}\n{sentence}".strip()
+            added.append(sentence)
+        if added:
+            her["persona"] = {**her["persona"], "about": about}
+        return added
 
     def forget_sources(self, companion_id):
         before = len(self.sources)
@@ -284,7 +335,8 @@ class PromptTests(unittest.TestCase):
         maya = {"name": "Maya", "memory": "- they love filter coffee",
                 "persona": {"style": "sassy", "length": "long", "emoji": "none", "language": "hinglish",
                             "about": "A 26-year-old architect from Pune."}}
-        prompt = system_prompt(maya, "Pranjall", NOW, looks="Long dark hair.")
+        prompt = system_prompt(maya, "Pranjall", NOW, looks="Long dark hair.", owner_about="I make apps.")
+        self.assertIn("What Pranjall wrote about themselves:\nI make apps.", prompt)
         self.assertIn("You are Maya, Pranjall's girlfriend", prompt)
         self.assertIn("roast Pranjall lovingly", prompt)
         self.assertIn("A 26-year-old architect from Pune.", prompt)
@@ -648,7 +700,7 @@ class ConversationTests(unittest.TestCase):
                                 text="what did I mark in the red circle?", chat_id=chat_id)
         asked = streamed(seen)[0]
         self.assertEqual(asked["model"], self.config.vision_model)
-        self.assertIn("2) the photo Pranjall sent 2 messages ago", asked["messages"][-1]["content"])
+        self.assertIn("1) the photo Pranjall sent 2 messages ago", asked["messages"][-1]["content"])
         # The earlier photo is still in the chat as its description, for the context around it.
         self.assertIn("[Photo: A red square.]", asked["messages"][-3]["content"])
         _, seen = self.run_turn([[{"content": "Rain again? ☔"}]], text="It's raining", chat_id=chat_id)
@@ -674,9 +726,9 @@ class ConversationTests(unittest.TestCase):
         events, seen = self.run_turn([[{"content": "That's me with someone 👀"}]], text="who is this?",
                                      photo=png("red"), faces=faces)
         legend = streamed(seen)[0]["messages"][-1]["content"]
-        self.assertIn("2) the photo Pranjall sent just now with \"who is this?\". "
+        self.assertIn("1) the photo Pranjall sent just now with \"who is this?\". "
                       "Faces: you, Luna (left); someone who is neither you nor Pranjall (right).", legend)
-        self.assertIn('Under each picture, "Faces:" says\nwhose faces are in it', streamed(seen)[0]["messages"][0]["content"])
+        self.assertIn('Under each picture, "Faces:" says whose faces are in it', streamed(seen)[0]["messages"][0]["content"])
         self.assertEqual(faces.asked[0], ["Luna", "Pranjall"])
         # The face models came with the vision model, and leave when her chat model is back.
         self.assertEqual(faces.unloads, 1)
@@ -722,6 +774,74 @@ class ConversationTests(unittest.TestCase):
         old = [photo, *[her, ask("hmm")] * 3, ask("what's in the photo?")]
         self.assertFalse(sees_pictures(old))
 
+    def test_several_photos_are_a_message_each_and_she_answers_them_together(self):
+        events, seen = self.run_turn([[{"content": "Both are lovely, the second more 😍"}]], text="which one?",
+                                     photo=[png("red"), png("blue")])
+        users = [event["message"] for event in events if event["type"] == "user"]
+        self.assertEqual([(m["content"], bool(m["image_url"])) for m in users], [("", True), ("which one?", True)])
+        self.assertIn({"type": "status", "text": "Looking at your photos"}, events)
+        # One look at both, each sent just now; then one reply.
+        looked = streamed(seen)[0]["messages"][-1]
+        self.assertEqual(len(looked["images"]), 2)
+        self.assertEqual(looked["content"].count("sent just now"), 2)
+        self.assertEqual(len(streamed(seen)), 1)
+        # Each photo is described for her later replies.
+        notes = [m["photo_note"] for m in self.store.messages if m["role"] == "user"]
+        self.assertEqual(notes, ["A red square.", "A red square."])
+
+    def test_she_remembers_facts_about_them_and_herself_for_every_chat(self):
+        about_them = {"function": {"name": "remember", "arguments": {"fact": "Their cats are Mini, Maxi and Melon"}}}
+        about_her = {"function": {"name": "remember", "arguments": {"fact": "My favourite colour is lavender",
+                                                                    "about": "me"}}}
+        events, _ = self.run_turn([[{"content": "Lavender, always 💜", "tool_calls": [about_them, about_her]}]],
+                                  text="my cats are Mini, Maxi and Melon. fav colour?")
+        her = self.store.companion(self.her["id"])
+        self.assertIn("- Their cats are Mini, Maxi and Melon", her["memory"])
+        self.assertTrue(her["persona"]["about"].endswith("Her favourite colour is lavender."))
+        remembered = next(e for e in events if e["type"] == "remembered")
+        self.assertEqual(len(remembered["facts"]), 2)
+        # What she remembers is in her next prompt, in any chat.
+        _, seen = self.run_turn([[{"content": "Mini, Maxi and Melon 🐱"}]], text="what are my cats called?")
+        prompt = streamed(seen)[0]["messages"][0]["content"]
+        self.assertIn("Their cats are Mini, Maxi and Melon", prompt)
+        self.assertIn("Her favourite colour is lavender", prompt)
+
+    def test_a_reaction_she_types_out_becomes_a_reaction(self):
+        # 17 November, her reply to a pool selfie began with the reaction as text.
+        calls, text = written_reactions("react: ❤️\n\nLook at you, Mr. Poolside Prince 😉")
+        self.assertEqual(calls, [{"function": {"name": "react", "arguments": {"emoji": "❤️"}}}])
+        self.assertEqual(text, "Look at you, Mr. Poolside Prince 😉")
+        self.assertEqual(written_reactions("I react: fast!")[0], [])
+        events, _ = self.run_turn([[{"content": "react: 🔥\nWow, the pool!"}]], text="LOOK!!!", photo=png("red"))
+        self.assertIn("reaction", [e["type"] for e in events])
+        saved = next(e for e in events if e["type"] == "done")["message"]
+        self.assertEqual(saved["content"], "Wow, the pool!")
+
+    def test_her_secret_notes_stay_out_of_a_photo_turn(self):
+        chat = self.store.create_chat(self.her["id"])
+        self.store.add_note(chat["id"], "Secret: chocolate with pink sea salt", 1000)
+        _, seen = self.run_turn([[{"content": "Nice!"}]], text="LOOK!!!", photo=png("red"), chat_id=chat["id"])
+        self.assertNotIn("pink sea salt", streamed(seen)[0]["messages"][0]["content"])
+        _, seen = self.run_turn([[{"content": "Hmm, guess again"}]], text="is it fruit?", chat_id=chat["id"])
+        self.assertIn("pink sea salt", streamed(seen)[0]["messages"][0]["content"])
+
+    def test_a_photo_gets_words_unless_a_picture_is_asked_for(self):
+        for words in ["add yourself here", "send me a selfie", "put yourself next to me", "pic of you please",
+                      "improve the lighting", "wish you could be in this photo", "take a photo of us", "you and me here?"]:
+            self.assertTrue(ASKS_FOR_PICTURE.search(words), words)
+        for words in ["LOOK!!!", "how do I look?", "who is this?", "which one is better?", "my new haircut 😎",
+                      "guess where I am", "the pool was so cold", "thoughts?"]:
+            self.assertFalse(ASKS_FOR_PICTURE.search(words), words)
+        # 17 November: "LOOK!!!" with a pool selfie, and the vision model took a picture of its own.
+        call = {"function": {"name": "create_image", "arguments": {"description": "me at the pool"}}}
+        events, seen = self.run_turn([[{"content": "", "tool_calls": [call]}], [{"content": "Look at you! 😍"}]],
+                                     text="LOOK!!!", photo=png("red"))
+        self.assertNotIn("create_image", [t["function"]["name"] for t in streamed(seen)[0].get("tools", [])])
+        self.assertNotIn("image_started", [e["type"] for e in events])
+        self.assertNotIn("graph", seen)
+        self.assertEqual(events[-2]["message"]["content"] if events[-1]["type"] == "chat" else events[-1]["message"]["content"],
+                         "Look at you! 😍")
+
     def test_she_sees_a_photo_and_steps_into_it(self):
         call = {"function": {"name": "create_image", "arguments": {
             "description": "standing beside them, smiling", "include_luna": True, "use_their_photo": True}}}
@@ -729,12 +849,14 @@ class ConversationTests(unittest.TestCase):
                                      text="add yourself here", photo=png("red"))
         self.assertEqual([e["type"] for e in events],
                          ["chat", "user", "status", "image_started", "image", "text", "done", "chat"])
-        # The vision model answers as her, seeing her profile picture and the photo itself, at its own context.
+        # The vision model answers as her, seeing the photo itself, at its own context. Not her profile picture:
+        # as picture 1 she took it for one of his photos and said "the first one is me" every time (17 November).
         first = streamed(seen)[0]
         self.assertEqual((first["model"], first["options"]["num_ctx"]), (self.config.vision_model, 8192))
-        self.assertEqual(len(first["messages"][-1]["images"]), 2)
-        self.assertIn("1) your profile picture: this is you, your face; 2) the photo Pranjall sent just now",
-                      first["messages"][-1]["content"])
+        self.assertEqual(len(first["messages"][-1]["images"]), 1)
+        self.assertIn("[Pictures you see now: 1) the photo Pranjall sent just now", first["messages"][-1]["content"])
+        self.assertNotIn("profile picture", first["messages"][-1]["content"])
+        self.assertIn('You are in a picture only when its "Faces:" says "you"', first["messages"][0]["content"])
         self.assertIn("Right now you see the pictures themselves", first["messages"][0]["content"])
         # Her caption after the picture comes from the same model, so nothing is swapped in between.
         self.assertEqual(streamed(seen)[1]["model"], self.config.vision_model)
@@ -957,6 +1079,33 @@ class GateTests(unittest.TestCase):
             self.assertEqual(client.get("/api/owner/photos").json()["photos"], [])
         self.assertEqual(self.client(None).get("/api/owner/photos").status_code, 401)
 
+    def test_the_owner_has_a_picture_a_name_she_calls_them_and_details(self):
+        with tempfile.TemporaryDirectory() as folder:
+            settings = config(Path(folder))
+            client = self.owner(settings)
+            me = client.get("/api/owner").json()
+            self.assertEqual((me["name"], me["about"], me["has_picture"]), ("", "", False))
+            self.assertEqual(me["called"], me["signed_in_as"])
+            saved = client.put("/api/owner", json={"name": "  Pran  ", "about": "I make apps. " + "x" * 3000}).json()
+            self.assertEqual((saved["name"], saved["called"]), ("Pran", "Pran"))
+            self.assertEqual(len(saved["about"]), SociaConfig.ABOUT_CHARS)
+            self.assertEqual(client.get("/api/owner/picture").status_code, 404)
+            self.assertEqual(client.post("/api/owner/picture", files={"photo": ("me.png", png("red"), "image/png")}).json(),
+                             {"saved": True})
+            self.assertTrue(client.get("/api/owner").json()["has_picture"])
+            self.assertEqual(client.get("/api/owner/avatar").headers["content-type"], "image/png")
+            # Their avatar is cut where they choose, as hers is.
+            default = client.get("/api/owner/avatar/crop").json()
+            moved = client.put("/api/owner/avatar/crop", json={"x": 0.3, "y": 0.4, "zoom": 2}).json()
+            self.assertEqual((moved["zoom"], moved["x"]), (2, 0.3))
+            self.assertEqual(client.delete("/api/owner/avatar/crop").json(), default)
+            self.assertEqual(client.put("/api/owner/avatar/crop", json={"x": "left"}).status_code, 400)
+            # Face recognition knows them by their picture too, before their other photos.
+            self.assertEqual(settings.owner_faces(), [settings.owner_picture_path])
+            self.assertEqual(client.delete("/api/owner/picture").json(), {"deleted": True})
+            self.assertFalse(client.get("/api/owner").json()["has_picture"])
+        self.assertEqual(self.client(None).get("/api/owner").status_code, 401)
+
     def test_her_other_pictures_are_added_and_removed(self):
         with tempfile.TemporaryDirectory() as folder:
             client = self.owner(config(Path(folder)))
@@ -974,6 +1123,22 @@ class GateTests(unittest.TestCase):
             self.assertEqual(client.post(base, files=too_many).status_code, 400)
             self.assertEqual(client.delete(url).json(), {"deleted": True})
             self.assertEqual(len(client.get(base).json()["references"]), 1)
+            # One of them becomes her profile picture, and the old profile picture takes its place.
+            settings = config(Path(folder))
+            profile = settings.profile_path(her["id"])
+            profile.parent.mkdir(parents=True, exist_ok=True)
+            profile.write_bytes(b"old profile")
+            self.store.update_companion(her["id"], {"persona": {"nude_pictures": "on"}})
+            left = client.get(base).json()["references"][0]
+            chosen = settings.references_dir(her["id"]) / left["name"]
+            picture = chosen.read_bytes()
+            self.assertEqual(client.post(f"{left['url']}/profile").json(), {"saved": True})
+            self.assertEqual(profile.read_bytes(), picture)
+            self.assertEqual(chosen.read_bytes(), b"old profile")
+            self.assertEqual(len(client.get(base).json()["references"]), 1)
+            # A new face: nude pictures wait for the owner's confirmation again.
+            self.assertEqual(self.store.companion(her["id"])["persona"]["nude_pictures"], "off")
+            self.assertEqual(client.post(f"{base}/..%2Fprofile.png/profile").status_code, 404)
             # Another girlfriend has her own pictures.
             other = self.store.create_companion("Maya", {}, "bf_emma")
             self.assertEqual(client.get(f"/api/companions/{other['id']}/references").json()["references"], [])
@@ -1166,6 +1331,64 @@ class FakeOllama:
 
 
 class MemoryReaderTests(unittest.TestCase):
+    def test_her_chats_are_read_for_what_they_and_she_said_once_quiet(self):
+        store = MemoryStore()
+        her = store.create_companion("Luna", {"about": "She is 25, from Mumbai."}, "af_heart")
+        chat = store.create_chat(her["id"])
+        store.add_message(chat["id"], "user", "this is Melon, my cat", None, "A tabby cat with a green collar.")
+        store.add_message(chat["id"], "luna", "Aww! My favourite colour is lavender, like her blanket 💜")
+        def answers(prompt):
+            if "Her bio so far" in prompt:
+                self.assertIn("lavender", prompt)
+                self.assertNotIn("this is Melon", prompt)
+                return "- Her favourite colour is lavender"
+            if "Answer only YES or NO" in prompt:
+                return "YES"
+            if "their girlfriend" in prompt:
+                # Their own words only: what a photo showed made "facts" such as "They have a lamp".
+                self.assertIn("this is Melon, my cat", prompt)
+                self.assertNotIn("tabby", prompt)
+                self.assertNotIn("lavender", prompt)
+                return "- Their cat is called Melon"
+            return "NONE"
+        reader = MemoryReader(store, FakeOllama(answers), asyncio.Lock())
+
+        async def run():
+            while await reader.step():
+                pass
+
+        asyncio.run(run())
+        her = store.companion(her["id"])
+        self.assertEqual(her["memory"], "- Their cat is called Melon")
+        self.assertEqual(her["persona"]["about"], "She is 25, from Mumbai.\nHer favourite colour is lavender.")
+        # Read once: nothing new, nothing read again.
+        self.assertEqual(store.quiet_chats(0), [])
+
+    def test_only_lasting_facts_are_kept(self):
+        # What the reader listed from a real chat on 17 November.
+        them = "\n".join(["- they have three cats named Mini, Maxi, and Melon", "- they hate olives", "- they are tired",
+                          "- they say good night", "- their name is they", "- they had maggi tonight"])
+        her = "\n".join(["- Her favourite colour is lavender", "- She grew up in Mumbai", "- She likes to miss people",
+                         "- She likes cozy chats", "- She loves baking", "- Her favourite snack is a samosa"])
+
+        async def ask(prompt):
+            # Each fact about them is then checked against their words; here every check says yes.
+            if "Answer only YES or NO" in prompt:
+                return "YES"
+            return them if "their girlfriend" in prompt else her
+
+        bio = "She loves baking. Her favourite snack is chocolate with pink sea salt."
+        chat = [{"role": "user", "text": "hi"}, {"role": "luna", "text": "hey"}]
+        self.assertEqual(asyncio.run(facts_about_them(ask, "Luna", chat)),
+                         ["- they have three cats named Mini, Maxi, and Melon", "- they hate olives"])
+        self.assertEqual(asyncio.run(facts_about_her(ask, "Luna", bio, chat)),
+                         ["- Her favourite colour is lavender", "- She grew up in Mumbai"])
+
+    def test_a_remember_she_types_out_is_made(self):
+        calls, text = written_remembers('remember {"about":"them","fact":"Their cats are Mini, Maxi and Melon"} So cute!')
+        self.assertEqual(calls[0]["function"]["arguments"]["fact"], "Their cats are Mini, Maxi and Melon")
+        self.assertEqual(text, "So cute!")
+
     def test_imported_chats_are_read_then_merged_into_her_memory(self):
         store = MemoryStore()
         her = store.create_companion("Maya", {}, "bf_emma")
