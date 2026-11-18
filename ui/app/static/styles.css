@@ -218,12 +218,12 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-edited { font-style: italic; }
 /* Editing one of your messages: the words in a box where the bubble was, Cancel and Save under it. */
 .sc-edit-form { display: flex; flex-direction: column; gap: 0.35rem; width: min(30rem, 100%); }
-.sc-edit {
+.sc-edit-box {
   width: 100%; min-height: 2.4rem; max-height: 40vh; resize: none; overflow-y: auto; box-sizing: border-box;
   padding: 0.55rem 0.8rem; border: 1px solid var(--lv-border); border-radius: 1.1rem;
   background: var(--lv-control); color: var(--lv-text); font: inherit;
 }
-.sc-edit:focus-visible { outline: 2px solid var(--lv-text); outline-offset: 1px; }
+.sc-edit-box:focus-visible { outline: 2px solid var(--lv-text); outline-offset: 1px; }
 .sc-edit-actions { display: flex; justify-content: flex-end; gap: 0.4rem; }
 .sc-edit-actions button {
   padding: 0.3rem 0.9rem; border: 1px solid var(--lv-border); border-radius: 999px; background: none;

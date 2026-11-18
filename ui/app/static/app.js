@@ -798,8 +798,8 @@ function meta(message) {
 // She reads the new words from her next reply on; what she already answered stays.
 function editMessage(message, item) {
   const row = item?.querySelector(".sc-bubble-row");
-  if (!row || item.querySelector(".sc-edit")) return;
-  const box = element("textarea", { className: "sc-edit", value: message.content, rows: 1 });
+  if (!row || item.querySelector(".sc-edit-form")) return;
+  const box = element("textarea", { className: "sc-edit-box", value: message.content, rows: 1 });
   box.setAttribute("aria-label", "Edit your message");
   const save = element("button", { type: "button", className: "sc-edit-save", textContent: "Save" });
   const cancel = element("button", { type: "button", className: "sc-edit-cancel", textContent: "Cancel" });
