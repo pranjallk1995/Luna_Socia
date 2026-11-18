@@ -106,6 +106,9 @@ def serialize(row: dict[str, Any]) -> dict[str, Any]:
         "apps": row.get("apps") or [],
         "created_at": row["created_at"].isoformat(),
         "edited": row.get("edited_at") is not None,
+        # What she saved with this reply, each with its place in the list (to forget it by); not the forgotten.
+        "remembered": [{"index": index, "about": item.get("about"), "fact": item.get("fact")}
+                       for index, item in enumerate(row.get("remembered") or []) if not item.get("forgotten")],
     }
 
 
@@ -682,7 +685,7 @@ class Conversation:
         noted = await self.write_notes(chat_id, [*calls, *written_notes(text)])
         remembered = await self.remember(companion["id"], calls)
         if remembered:
-            yield {"type": "remembered", "facts": remembered}
+            yield {"type": "remembered", "facts": [item["fact"] for item in remembered]}
         reaction = await self.react(calls, rows)
         if reaction:
             yield {"type": "reaction", **reaction}
@@ -715,8 +718,8 @@ class Conversation:
             for note in noted:
                 used.append({"function": {"name": "note", "arguments": {"text": note}}})
                 results.append({"role": "tool", "content": "Noted. Only you can see it."})
-            for fact in remembered:
-                used.append({"function": {"name": "remember", "arguments": {"fact": fact}}})
+            for item in remembered:
+                used.append({"function": {"name": "remember", "arguments": {"fact": item["fact"]}}})
                 results.append({"role": "tool", "content": "Remembered for every chat."})
             if reaction:
                 used.append({"function": {"name": "react", "arguments": {"emoji": reaction["reaction"]}}})
@@ -748,15 +751,19 @@ class Conversation:
             except Exception:  # noqa: BLE001 - her reply stands without it
                 logger.exception("Remembering after the turn failed")
                 learnt = []
-            facts = [*remembered, *(item["fact"] for item in learnt if item["fact"] not in remembered)]
-            if len(facts) > len(remembered):
-                yield {"type": "remembered", "facts": facts}
+            known = {item["fact"] for item in remembered}
+            new = [{"about": item["about"], "fact": item["fact"]} for item in learnt if item["fact"] not in known]
+            if new:
+                remembered = [*remembered, *new]
+                yield {"type": "remembered", "facts": [item["fact"] for item in remembered]}
 
-        saved = await asyncio.to_thread(self.store.add_message, chat_id, "luna", text.strip(), image_id, None, used_apps)
+        saved = await asyncio.to_thread(self.store.add_message, chat_id, "luna", text.strip(), image_id, None, used_apps,
+                                        remembered or None)
         yield {"type": "done", "message": serialize(saved)}
 
-    async def remember(self, companion_id: int, calls: list[dict[str, Any]]) -> list[str]:
-        """The facts she chose to remember, added to her memory for every chat; the ones that are new."""
+    async def remember(self, companion_id: int, calls: list[dict[str, Any]]) -> list[dict[str, str]]:
+        """The facts she chose to remember, added to her memory for every chat; the ones that are new, each with
+        whom it is about ("them": her memory of you, "me": her bio)."""
         remembered = []
         for call in calls:
             if (call.get("function") or {}).get("name") != "remember":
@@ -775,9 +782,9 @@ class Conversation:
                 fact = re.sub(r"^(?:I'm|I am)\b", "She is", fact)
                 fact = re.sub(r"^My\b", "Her", re.sub(r"^I\b", "She", fact))
                 if await asyncio.to_thread(self.store.add_to_bio, companion_id, [fact], SociaConfig.ABOUT_CHARS):
-                    remembered.append(fact)
+                    remembered.append({"about": "me", "fact": fact})
             elif await asyncio.to_thread(self.store.remember, companion_id, fact, SociaConfig.MEMORY_CHARS):
-                remembered.append(fact)
+                remembered.append({"about": "them", "fact": fact})
         return remembered
 
     async def write_notes(self, chat_id: int, calls: list[dict[str, Any]]) -> list[str]:

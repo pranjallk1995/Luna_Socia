@@ -18,6 +18,7 @@ from app.chat import (ASKS_FOR_PICTURE, PICTURE_PROMISE, written_calls, written_
                       written_notes, written_picture)
 from app.memory import ExportError, MemoryReader, fact_lines, facts_about_her, facts_about_them, parse_export, their_words
 from app.config import SociaConfig
+from app.store import without_fact
 from app.images import ComfyUI, workflow
 from app.ollama import Ollama
 from app.persona import DEFAULT_PERSONA, clean_persona, image_prompt, system_prompt
@@ -252,14 +253,31 @@ class MemoryStore:
     def image(self, image_id):
         return next((i for i in self.images if i["id"] == image_id), None)
 
-    def add_message(self, chat_id, role, content, image_id=None, photo_note=None, apps=None):
+    def add_message(self, chat_id, role, content, image_id=None, photo_note=None, apps=None, remembered=None):
         image = self.image(image_id) if image_id else None
         row = {"id": len(self.messages) + 1, "chat_id": chat_id, "role": role, "content": content,
                "image_id": image_id, "photo_note": photo_note, "reaction": None, "apps": apps or None, "created_at": NOW, "edited_at": None,
+               "remembered": remembered or None,
                "image_kind": image and image["kind"], "image_prompt": image and image["prompt"],
                "image_file": image and image["file"]}
         self.messages.append(row)
         return row
+
+    def forget_remembered(self, message_id, index):
+        row = next((m for m in self.messages if m["id"] == message_id), None)
+        items = list((row or {}).get("remembered") or [])
+        if not 0 <= index < len(items) or items[index].get("forgotten"):
+            return None
+        item = items[index]
+        her = next(c for c in self.companions_ if c["id"] == self.chat(row["chat_id"])["companion_id"])
+        if item["about"] == "them":
+            her["memory"], found = without_fact(her["memory"], "them", item["fact"])
+        else:
+            about, found = without_fact(str(her["persona"].get("about") or ""), "me", item["fact"])
+            her["persona"] = {**her["persona"], "about": about}
+        items[index] = {**item, "forgotten": True}
+        row["remembered"] = items
+        return row, found
 
     def edit_message(self, message_id, content):
         row = next((m for m in self.messages if m["id"] == message_id), None)
@@ -807,6 +825,8 @@ class ConversationTests(unittest.TestCase):
         self.assertTrue(her["persona"]["about"].endswith("Her favourite colour is lavender."))
         remembered = next(e for e in events if e["type"] == "remembered")
         self.assertEqual(len(remembered["facts"]), 2)
+        # Kept with her reply, each with where it went, so it can be taken back from the chat.
+        self.assertEqual([(i["index"], i["about"]) for i in next(e for e in events if e["type"] == "done")["message"]["remembered"]], [(0, "them"), (1, "me")])
         # What she remembers is in her next prompt, in any chat.
         _, seen = self.run_turn([[{"content": "Mini, Maxi and Melon 🐱"}]], text="what are my cats called?")
         prompt = streamed(seen)[0]["messages"][0]["content"]
@@ -1583,6 +1603,35 @@ class MessageDeleteTests(unittest.TestCase):
         photo = self.store.add_image(self.chat["id"], "photo", "p.jpg")
         bare = self.store.add_message(self.chat["id"], "user", "", photo)
         self.assertEqual(self.client.put(f"/api/messages/{bare['id']}", json={"content": "hi"}).status_code, 400)
+
+    def test_a_wrong_fact_is_taken_back_from_the_chat(self):
+        her = self.store.companions_[0]
+        her["memory"] = "- They love pizza\n- Their boss is Neha"
+        her["persona"] = {"about": "She is 25.\nHer favourite fruit is the Alphonso mango. She bakes."}
+        reply = self.store.add_message(self.chat["id"], "luna", "Got it 😘", remembered=[
+            {"about": "them", "fact": "Their boss is Neha"}, {"about": "me", "fact": "Her favourite fruit is the Alphonso mango"}])
+        listed = self.client.get(f"/api/chats/{self.chat['id']}/messages").json()["messages"][0]
+        self.assertEqual([i["fact"] for i in listed["remembered"]], ["Their boss is Neha", "Her favourite fruit is the Alphonso mango"])
+        url = f"/api/messages/{reply['id']}/remembered"
+        answer = self.client.delete(f"{url}/0").json()
+        self.assertTrue(answer["found"])
+        self.assertEqual(her["memory"], "- They love pizza")
+        # Gone from the chat too; the other fact keeps its own number.
+        self.assertEqual([(i["index"], i["fact"]) for i in answer["message"]["remembered"]],
+                         [(1, "Her favourite fruit is the Alphonso mango")])
+        self.assertTrue(self.client.delete(f"{url}/1").json()["found"])
+        self.assertEqual(her["persona"]["about"], "She is 25.\nShe bakes.")
+        # Kept on the message as forgotten: a wrong fact to learn from.
+        self.assertTrue(all(item["forgotten"] for item in self.store.message(reply["id"])["remembered"]))
+        self.assertEqual(self.client.delete(f"{url}/1").status_code, 404)
+        self.assertEqual(self.client.delete(f"{url}/5").status_code, 404)
+        self.assertEqual(self.client.delete("/api/messages/999/remembered/0").status_code, 404)
+
+    def test_a_fact_is_found_as_it_was_saved(self):
+        self.assertEqual(without_fact("- A\n- they LOVE pizza\n- B", "them", "They love pizza"), ("- A\n- B", True))
+        self.assertEqual(without_fact("- A", "them", "They love pizza"), ("- A", False))
+        self.assertEqual(without_fact("She is 25. She bakes!", "me", "she is 25"), ("She bakes!", True))
+        self.assertEqual(without_fact("She bakes.", "me", ""), ("She bakes.", False))
 
     def test_nothing_is_deleted_while_she_is_answering(self):
         sent = self.store.add_message(self.chat["id"], "user", "hey")

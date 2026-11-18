@@ -118,6 +118,9 @@ CREATE INDEX IF NOT EXISTS memory_sources_unread ON memory_sources (companion_id
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS apps JSONB;
 -- When the owner last changed the words of one of their messages; she reads the new words.
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
+-- What she saved while writing this reply: [{"about": "them" | "me", "fact": "...", "forgotten": true?}].
+-- A fact the owner took back out stays here, marked forgotten: a wrong one to learn from.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS remembered JSONB;
 -- Socia's sign-in to the owner's Luna apps: its OAuth client at Sentia's sign-on and the
 -- tokens the owner approved. One row; no refresh token means not connected.
 CREATE TABLE IF NOT EXISTS apps_connection (
@@ -151,7 +154,29 @@ LEFT JOIN LATERAL (SELECT count(*) AS chats, max(updated_at) AS last_active FROM
 LEFT JOIN LATERAL (SELECT count(*) AS sources, count(facts) AS read FROM memory_sources
                    WHERE companion_id = c.id AND source <> 'socia') mem ON true"""
 
-MESSAGE_COLUMNS = """m.id, m.chat_id, m.role, m.content, m.image_id, m.photo_note, m.reaction, m.apps, m.created_at, m.edited_at,
+def without_fact(text: str, about: str, fact: str) -> tuple[str, bool]:
+    """Her memory (about "them": a "- fact" line) or her bio (about "me": a sentence) without one fact she
+    saved, and whether it was there. Matched as it was saved, ignoring case."""
+    fact = fact.removeprefix("- ").strip()
+    if not fact:
+        return text, False
+    if about == "them":
+        lines = text.splitlines()
+        kept = [line for line in lines if line.removeprefix("- ").strip().casefold() != fact.casefold()]
+        return "\n".join(kept), len(kept) < len(lines)
+    sentence = fact[0].upper() + fact[1:]
+    if not sentence.endswith((".", "!", "?")):
+        sentence += "."
+    at = text.casefold().find(sentence.casefold())
+    if at < 0:
+        return text, False
+    rest = text[:at] + text[at + len(sentence):]
+    # The sentence's own line goes with it; inside a line, one space is left between its neighbours.
+    lines = [" ".join(line.split()) for line in rest.splitlines()]
+    return "\n".join(line for line in lines if line), True
+
+
+MESSAGE_COLUMNS = """m.id, m.chat_id, m.role, m.content, m.image_id, m.photo_note, m.reaction, m.apps, m.created_at, m.edited_at, m.remembered,
                      i.kind AS image_kind, i.prompt AS image_prompt, i.file AS image_file"""
 
 
@@ -418,11 +443,14 @@ class SociaStore:
                               "WHERE i.id = %s", (image_id,)).fetchone()
 
     def add_message(self, chat_id: int, role: str, content: str, image_id: int | None = None,
-                    photo_note: str | None = None, apps: list[dict[str, str]] | None = None) -> dict[str, Any]:
+                    photo_note: str | None = None, apps: list[dict[str, str]] | None = None,
+                    remembered: list[dict[str, str]] | None = None) -> dict[str, Any]:
         with self.connect() as db:
             row = db.execute(
-                "INSERT INTO messages (chat_id, role, content, image_id, photo_note, apps) VALUES (%s, %s, %s, %s, %s, %s) "
-                "RETURNING id", (chat_id, role, content, image_id, photo_note, Jsonb(apps) if apps else None)).fetchone()
+                "INSERT INTO messages (chat_id, role, content, image_id, photo_note, apps, remembered) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (chat_id, role, content, image_id, photo_note, Jsonb(apps) if apps else None,
+                 Jsonb(remembered) if remembered else None)).fetchone()
             db.execute("UPDATE chats SET updated_at = now() WHERE id = %s", (chat_id,))
             return db.execute(f"SELECT {MESSAGE_COLUMNS} FROM messages m LEFT JOIN images i ON i.id = m.image_id "
                               "WHERE m.id = %s", (row["id"],)).fetchone()
@@ -470,6 +498,35 @@ class SociaStore:
                 return None
             return db.execute(f"SELECT {MESSAGE_COLUMNS} FROM messages m LEFT JOIN images i ON i.id = m.image_id "
                               "WHERE m.id = %s", (message_id,)).fetchone()
+
+    def forget_remembered(self, message_id: int, index: int) -> tuple[dict[str, Any], bool] | None:
+        """Take a fact she saved with this message back out of her memory or bio, and mark it forgotten there;
+        the message and whether the fact was still in her memory or bio, or None if there is no such fact."""
+        with self.connect() as db, db.transaction():
+            row = db.execute("SELECT m.remembered, c.companion_id FROM messages m JOIN chats c ON c.id = m.chat_id "
+                             "WHERE m.id = %s FOR UPDATE OF m", (message_id,)).fetchone()
+            items = list((row or {}).get("remembered") or [])
+            if not 0 <= index < len(items) or items[index].get("forgotten"):
+                return None
+            item = items[index]
+            her = db.execute("SELECT memory, persona FROM companions WHERE id = %s FOR UPDATE",
+                             (row["companion_id"],)).fetchone()
+            found = False
+            if her is not None and item.get("about") == "them":
+                memory, found = without_fact(her["memory"] or "", "them", item.get("fact") or "")
+                if found:
+                    db.execute("UPDATE companions SET memory = %s, updated_at = now() WHERE id = %s",
+                               (memory, row["companion_id"]))
+            elif her is not None:
+                about, found = without_fact(str((her["persona"] or {}).get("about") or ""), "me", item.get("fact") or "")
+                if found:
+                    db.execute("UPDATE companions SET persona = persona || jsonb_build_object('about', %s::text), "
+                               "updated_at = now() WHERE id = %s", (about, row["companion_id"]))
+            items[index] = {**item, "forgotten": True}
+            db.execute("UPDATE messages SET remembered = %s WHERE id = %s", (Jsonb(items), message_id))
+            message = db.execute(f"SELECT {MESSAGE_COLUMNS} FROM messages m LEFT JOIN images i ON i.id = m.image_id "
+                                 "WHERE m.id = %s", (message_id,)).fetchone()
+        return message, found
 
     def set_reaction(self, message_id: int, reaction: str | None) -> dict[str, Any] | None:
         """Put a reaction on a message, or take it off with None; the message, or None if there is none."""

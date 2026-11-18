@@ -432,6 +432,14 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-luna-app-on .sc-luna-app-text small { color: var(--lv-muted); }
 .sc-luna-app-on .sc-luna-app-state { border-color: var(--lv-accent); color: var(--lv-accent); }
 .sc-remembered { margin: 0.25rem 0 0; color: var(--lv-muted); font-size: var(--luna-text-small); font-style: italic; }
+.sc-fact { white-space: normal; }
+.sc-forget {
+  display: inline-grid; place-items: center; width: 1.25rem; height: 1.25rem; margin-left: 0.15rem; padding: 0;
+  border: 0; border-radius: 50%; background: none; color: var(--lv-muted); cursor: pointer; font-style: normal;
+  font-size: 0.9rem; line-height: 1; vertical-align: middle;
+}
+.sc-forget:hover { background: var(--lv-control-hover); color: var(--lv-text); }
+.sc-forget:focus-visible { outline: 2px solid var(--lv-text); outline-offset: 1px; }
 .sc-used-apps { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.25rem; }
 .sc-used-app { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.1rem 0.5rem 0.1rem 0.25rem;
   border: 1px solid var(--lv-border); border-radius: 999px; background: var(--lv-control); color: var(--lv-muted); font-size: 0.7rem; }

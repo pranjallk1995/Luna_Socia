@@ -314,6 +314,18 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         row = await asyncio.to_thread(store.edit_message, found["id"], content)
         return JSONResponse({"message": serialize(row)})
 
+    async def forget(request: Request) -> Response:
+        """Take back a fact she saved with one of her replies: out of her memory of you, or out of her bio."""
+        user = await owner(request)
+        if isinstance(user, Response):
+            return user
+        forgotten = await asyncio.to_thread(store.forget_remembered, request.path_params["message_id"],
+                                            request.path_params["index"])
+        if forgotten is None:
+            return JSONResponse({"error": "She has no such fact from that message."}, 404)
+        row, found = forgotten
+        return JSONResponse({"message": serialize(row), "found": found})
+
     async def react(request: Request) -> Response:
         """The owner's reaction on one of her messages: an emoji to put it on, or null to take it off."""
         user = await owner(request)
@@ -836,6 +848,7 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         Route("/api/chats/{chat_id:int}/messages", messages),
         Route("/api/messages/{message_id:int}", message, methods=["PUT", "DELETE"]),
         Route("/api/messages/{message_id:int}/reaction", react, methods=["PUT"]),
+        Route("/api/messages/{message_id:int}/remembered/{index:int}", forget, methods=["DELETE"]),
         Route("/api/send", send, methods=["POST"]),
         Route("/api/images/{image_id:int}", image),
         Route("/api/transcribe", transcribe, methods=["POST"]),

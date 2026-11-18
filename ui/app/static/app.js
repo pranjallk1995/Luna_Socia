@@ -627,9 +627,40 @@ function messageElement(message) {
     });
   }
   if (message.apps?.length) element.append(usedApps(message.apps));
+  if (message.remembered?.length) element.append(rememberedLine(message));
   element.append(meta(message));
   showReaction(element, message.reaction);
   return element;
+}
+
+// What she saved with this reply, for every chat: each fact with an × to take it back if she got it wrong.
+function rememberedLine(message) {
+  const line = element("p", { className: "sc-remembered" }, "Remembered: ");
+  message.remembered.forEach((item, position) => {
+    if (position) line.append(" · ");
+    const where = item.about === "me" ? "her bio" : "her memory of you";
+    const forget = element("button", { type: "button", className: "sc-forget", textContent: "×",
+                                       title: `Wrong? Take it out of ${where}` });
+    forget.setAttribute("aria-label", `Forget: ${item.fact}`);
+    forget.addEventListener("click", () => forgetFact(message.id, item, line));
+    line.append(element("span", { className: "sc-fact" }, item.fact, forget));
+  });
+  return line;
+}
+
+async function forgetFact(id, item, line) {
+  const where = item.about === "me" ? "her bio" : "her memory of you";
+  if (!confirm(`Forget "${item.fact}"? It comes out of ${where}.`)) return;
+  const reply = await fetch(`/api/messages/${id}/remembered/${item.index}`, { method: "DELETE" }).catch(() => null);
+  if (!reply?.ok) {
+    const { error } = (await reply?.json().catch(() => null)) || {};
+    alert(error || "She could not forget that just now.");
+    return;
+  }
+  const { message, found } = await reply.json();
+  if (message.remembered.length) line.replaceWith(rememberedLine(message));
+  else line.remove();
+  if (!found) alert(`It was no longer in ${where} (changed there since), so nothing else changed.`);
 }
 
 // Each Luna app's logo (copied from its page into static/apps), for her replies and the settings list.
@@ -1048,13 +1079,11 @@ function handle(event, reply) {
       break;
     }
     case "remembered":
-      // What she saved for every chat: shown under her reply, so you know she will remember it.
-      reply.remembered = element("p", { className: "sc-remembered", textContent: `Remembered: ${event.facts.join(" · ")}` });
+      // What she saved for every chat: shown under her reply when it is done, which carries it.
       break;
     case "done": {
       const finished = messageElement(event.message);
       reply.element.querySelectorAll(".sc-error").forEach((error) => finished.append(error));
-      if (reply.remembered) finished.append(reply.remembered);
       reply.element.replaceWith(finished);
       if (state.voice && event.message.content) speak(event.message.id);
       break;
