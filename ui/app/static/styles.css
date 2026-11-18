@@ -432,7 +432,6 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-luna-app-on .sc-luna-app-text small { color: var(--lv-muted); }
 .sc-luna-app-on .sc-luna-app-state { border-color: var(--lv-accent); color: var(--lv-accent); }
 .sc-remembered { margin: 0.25rem 0 0; color: var(--lv-muted); font-size: var(--luna-text-small); font-style: italic; }
-.sc-fact { white-space: normal; }
 .sc-fact { display: inline-flex; align-items: center; gap: 0.3rem; }
 .sc-forget {
   display: inline-grid; place-items: center; flex: 0 0 auto; width: 1.6rem; height: 1.6rem; padding: 0;
