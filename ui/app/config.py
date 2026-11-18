@@ -18,8 +18,9 @@ class SociaConfig:
     OWNER_ID: ClassVar[str] = "owner"
     COOKIE_NAME: ClassVar[str] = "luna_sso"
     SESSION_RECHECK_SECONDS: ClassVar[float] = 60.0
-    # Messages of the conversation Luna sees on each reply.
-    HISTORY_MESSAGES: ClassVar[int] = 40
+    # Messages of the conversation Luna sees on each reply. 20, not 40: an 8B model copies the chat it sees, and
+    # twenty of her own long replies taught her to write longer, with the same lines at the end (notebook 04).
+    HISTORY_MESSAGES: ClassVar[int] = 20
     # Messages the page loads at a time, and the longest chat title, taken from its first message.
     MESSAGES_PAGE: ClassVar[int] = 50
     CHAT_TITLE_CHARS: ClassVar[int] = 60
@@ -65,7 +66,7 @@ class SociaConfig:
     comfyui_url: str = "http://luna-sentia-comfyui:8188"
     chat_model: str = "huihui_ai/qwen3-abliterated:8b"
     vision_model: str = "huihui_ai/qwen3-vl-abliterated:8b-instruct"
-    # 8k holds the last 40 short messages and leaves room on the GPU; it must equal
+    # 8k holds the last 20 messages and leaves room on the GPU; it must equal
     # SENTIA_RESIDENT_CONTEXT, or Ollama reloads the model for every reply.
     context_tokens: int = 8192
     # The vision model's context. It sees the photos and answers as her, with her prompt and the

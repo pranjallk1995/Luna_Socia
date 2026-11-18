@@ -111,7 +111,7 @@ play music, dim the lights or find a photo from the chat.
 1. What you send is stored in the `lunasocia` database, in its chat: your first message in a
    new chat starts it and names it.
 2. Her reply streams from the chat model, with her persona (`ui/app/persona.py`), what she
-   remembers about you (`ui/app/memory.py`), and the last 40 messages of this chat. Her own
+   remembers about you (`ui/app/memory.py`), and the last 20 messages of this chat. Her own
    looks, described once from her profile picture, are part of it.
    - **With a photo**, or a question about one from the last 4 messages ("which one is
      better?", "what did I circle?"), the vision model answers instead. It sees the chat's last
