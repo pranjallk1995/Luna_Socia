@@ -105,6 +105,7 @@ def serialize(row: dict[str, Any]) -> dict[str, Any]:
         "reaction": row.get("reaction"),
         "apps": row.get("apps") or [],
         "created_at": row["created_at"].isoformat(),
+        "edited": row.get("edited_at") is not None,
     }
 
 

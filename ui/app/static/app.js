@@ -724,6 +724,7 @@ const META_ICONS = {
   play: '<path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/>',
   download: '<path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/>',
   react: '<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01"/><path d="M15 9.5h.01"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   delete: '<path d="M4 7h16"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/>',
 };
 
@@ -743,10 +744,16 @@ function meta(message) {
   line.className = "sc-meta";
   const time = new Date(message.created_at);
   line.append(time.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }));
+  if (message.edited) line.append(element("span", { className: "sc-edited", textContent: "edited" }));
   if (message.id && message.role === "luna") {
     const add = metaAction("button", "react", "React to this message");
     add.addEventListener("click", (event) => openReactions(message.id, event.currentTarget));
     line.append(add);
+  }
+  if (message.id && message.role === "user" && message.content) {
+    const edit = metaAction("button", "edit", "Edit this message");
+    edit.addEventListener("click", (event) => editMessage(message, event.currentTarget.closest(".sc-message")));
+    line.append(edit);
   }
   if (message.id) {
     const remove = metaAction("button", "delete", "Delete this message");
@@ -754,6 +761,48 @@ function meta(message) {
     line.append(remove);
   }
   return line;
+}
+
+// New words for one of your messages, typed in place of it: Enter saves, Esc or Cancel leaves it as it was.
+// She reads the new words from her next reply on; what she already answered stays.
+function editMessage(message, item) {
+  const row = item?.querySelector(".sc-bubble-row");
+  if (!row || item.querySelector(".sc-edit")) return;
+  const box = element("textarea", { className: "sc-edit", value: message.content, rows: 1 });
+  box.setAttribute("aria-label", "Edit your message");
+  const save = element("button", { type: "button", className: "sc-edit-save", textContent: "Save" });
+  const cancel = element("button", { type: "button", className: "sc-edit-cancel", textContent: "Cancel" });
+  const form = element("div", { className: "sc-edit-form" }, box,
+    element("div", { className: "sc-edit-actions" }, cancel, save));
+  const fit = () => { box.style.height = "auto"; box.style.height = `${box.scrollHeight}px`; };
+  const close = () => { form.replaceWith(row); };
+  const done = async () => {
+    const content = box.value.trim();
+    if (!content) { alert("Say something, or delete the message."); return; }
+    if (content === message.content) { close(); return; }
+    save.disabled = true;
+    const reply = await fetch(`/api/messages/${message.id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }),
+    }).catch(() => null);
+    save.disabled = false;
+    if (!reply?.ok) {
+      const { error } = (await reply?.json().catch(() => null)) || {};
+      alert(error || "That edit did not stick.");
+      return;
+    }
+    item.replaceWith(messageElement((await reply.json()).message));
+  };
+  box.addEventListener("input", fit);
+  box.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); done(); }
+    if (event.key === "Escape") { event.preventDefault(); close(); }
+  });
+  save.addEventListener("click", done);
+  cancel.addEventListener("click", close);
+  row.replaceWith(form);
+  fit();
+  box.focus();
+  box.setSelectionRange(box.value.length, box.value.length);
 }
 
 // Forget one message, with its photo or picture. She stops seeing it too.

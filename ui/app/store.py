@@ -116,6 +116,8 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS reaction TEXT;
 CREATE INDEX IF NOT EXISTS memory_sources_unread ON memory_sources (companion_id, id) WHERE facts IS NULL;
 -- The Luna apps she used for a reply: [{"app": "vibia", "tool": "play_tracks"}, ...].
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS apps JSONB;
+-- When the owner last changed the words of one of their messages; she reads the new words.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
 -- Socia's sign-in to the owner's Luna apps: its OAuth client at Sentia's sign-on and the
 -- tokens the owner approved. One row; no refresh token means not connected.
 CREATE TABLE IF NOT EXISTS apps_connection (
@@ -149,7 +151,7 @@ LEFT JOIN LATERAL (SELECT count(*) AS chats, max(updated_at) AS last_active FROM
 LEFT JOIN LATERAL (SELECT count(*) AS sources, count(facts) AS read FROM memory_sources
                    WHERE companion_id = c.id AND source <> 'socia') mem ON true"""
 
-MESSAGE_COLUMNS = """m.id, m.chat_id, m.role, m.content, m.image_id, m.photo_note, m.reaction, m.apps, m.created_at,
+MESSAGE_COLUMNS = """m.id, m.chat_id, m.role, m.content, m.image_id, m.photo_note, m.reaction, m.apps, m.created_at, m.edited_at,
                      i.kind AS image_kind, i.prompt AS image_prompt, i.file AS image_file"""
 
 
@@ -458,6 +460,16 @@ class SociaStore:
                 "DELETE FROM images WHERE id = %s AND NOT EXISTS (SELECT 1 FROM messages WHERE image_id = %s) "
                 "RETURNING file", (row["image_id"], row["image_id"])).fetchone()
         return [image["file"]] if image else []
+
+    def edit_message(self, message_id: int, content: str) -> dict[str, Any] | None:
+        """New words for a message, marked edited; the message, or None if there is none."""
+        with self.connect() as db:
+            row = db.execute("UPDATE messages SET content = %s, edited_at = now() WHERE id = %s RETURNING id",
+                             (content, message_id)).fetchone()
+            if row is None:
+                return None
+            return db.execute(f"SELECT {MESSAGE_COLUMNS} FROM messages m LEFT JOIN images i ON i.id = m.image_id "
+                              "WHERE m.id = %s", (message_id,)).fetchone()
 
     def set_reaction(self, message_id: int, reaction: str | None) -> dict[str, Any] | None:
         """Put a reaction on a message, or take it off with None; the message, or None if there is none."""

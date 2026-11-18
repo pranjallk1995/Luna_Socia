@@ -281,19 +281,38 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         rows = await asyncio.to_thread(store.recent, chat_id, SociaConfig.MESSAGES_PAGE, before)
         return JSONResponse({"messages": [serialize(row) for row in rows], "page": SociaConfig.MESSAGES_PAGE})
 
-    async def delete_message(request: Request) -> Response:
-        """Forget one message, with its photo or picture; she no longer sees it either."""
+    async def message(request: Request) -> Response:
+        """Change the words of one of your messages (PUT), or forget a message (DELETE)."""
         user = await owner(request)
         if isinstance(user, Response):
             return user
         if conversation.turn.locked():
             return JSONResponse({"error": "She is still answering."}, 409)
+        if request.method == "PUT":
+            return await edit_message(request)
+        # Forgotten with its photo or picture; she no longer sees it either.
         files = await asyncio.to_thread(store.delete_message, request.path_params["message_id"])
         if files is None:
             return JSONResponse({"error": "no such message"}, 404)
         for file in files:
             (config.images_dir / file).unlink(missing_ok=True)
         return JSONResponse({"deleted": True})
+
+    async def edit_message(request: Request) -> Response:
+        """Your message with new words, marked edited; she reads the new words from her next reply on."""
+        body = await request.json()
+        content = str(body.get("content") or "").strip() if isinstance(body, dict) else ""
+        if not content:
+            return JSONResponse({"error": "Say something, or delete the message."}, 400)
+        found = await asyncio.to_thread(store.message, request.path_params["message_id"])
+        if found is None:
+            return JSONResponse({"error": "no such message"}, 404)
+        if found["role"] != "user":
+            return JSONResponse({"error": "Only your own messages can be edited."}, 400)
+        if not found["content"]:
+            return JSONResponse({"error": "A photo without words has nothing to edit."}, 400)
+        row = await asyncio.to_thread(store.edit_message, found["id"], content)
+        return JSONResponse({"message": serialize(row)})
 
     async def react(request: Request) -> Response:
         """The owner's reaction on one of her messages: an emoji to put it on, or null to take it off."""
@@ -815,7 +834,7 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         Route("/api/voices/{voice}/sample", voice_sample),
         Route("/api/chats/{chat_id:int}", chat, methods=["GET", "PATCH", "DELETE"]),
         Route("/api/chats/{chat_id:int}/messages", messages),
-        Route("/api/messages/{message_id:int}", delete_message, methods=["DELETE"]),
+        Route("/api/messages/{message_id:int}", message, methods=["PUT", "DELETE"]),
         Route("/api/messages/{message_id:int}/reaction", react, methods=["PUT"]),
         Route("/api/send", send, methods=["POST"]),
         Route("/api/images/{image_id:int}", image),

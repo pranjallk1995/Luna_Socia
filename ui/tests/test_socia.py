@@ -255,10 +255,17 @@ class MemoryStore:
     def add_message(self, chat_id, role, content, image_id=None, photo_note=None, apps=None):
         image = self.image(image_id) if image_id else None
         row = {"id": len(self.messages) + 1, "chat_id": chat_id, "role": role, "content": content,
-               "image_id": image_id, "photo_note": photo_note, "reaction": None, "apps": apps or None, "created_at": NOW,
+               "image_id": image_id, "photo_note": photo_note, "reaction": None, "apps": apps or None, "created_at": NOW, "edited_at": None,
                "image_kind": image and image["kind"], "image_prompt": image and image["prompt"],
                "image_file": image and image["file"]}
         self.messages.append(row)
+        return row
+
+    def edit_message(self, message_id, content):
+        row = next((m for m in self.messages if m["id"] == message_id), None)
+        if row is None:
+            return None
+        row.update(content=content, edited_at=NOW)
         return row
 
     def set_reaction(self, message_id, reaction):
@@ -1560,6 +1567,23 @@ class MessageDeleteTests(unittest.TestCase):
         self.assertEqual(self.client.put("/api/messages/999/reaction", json={"reaction": "🔥"}).status_code, 404)
         self.assertIn("😂", self.client.get("/api/options").json()["reactions"])
 
+    def test_your_message_can_be_edited_and_she_reads_the_new_words(self):
+        mine = self.store.add_message(self.chat["id"], "user", "my favourite is pizz")
+        hers = self.store.add_message(self.chat["id"], "luna", "Pizza? 🍕")
+        url = f"/api/messages/{mine['id']}"
+        edited = self.client.put(url, json={"content": "  my favourite is pizza "}).json()["message"]
+        self.assertEqual((edited["content"], edited["edited"]), ("my favourite is pizza", True))
+        listed = self.client.get(f"/api/chats/{self.chat['id']}/messages").json()["messages"]
+        self.assertEqual([(m["content"], m["edited"]) for m in listed], [("my favourite is pizza", True), ("Pizza? 🍕", False)])
+        # What she reads on her next reply comes from the same messages.
+        self.assertEqual(self.store.recent(self.chat["id"], 40)[0]["content"], "my favourite is pizza")
+        self.assertEqual(self.client.put(url, json={"content": "  "}).status_code, 400)
+        self.assertEqual(self.client.put(f"/api/messages/{hers['id']}", json={"content": "no"}).status_code, 400)
+        self.assertEqual(self.client.put("/api/messages/999", json={"content": "hi"}).status_code, 404)
+        photo = self.store.add_image(self.chat["id"], "photo", "p.jpg")
+        bare = self.store.add_message(self.chat["id"], "user", "", photo)
+        self.assertEqual(self.client.put(f"/api/messages/{bare['id']}", json={"content": "hi"}).status_code, 400)
+
     def test_nothing_is_deleted_while_she_is_answering(self):
         sent = self.store.add_message(self.chat["id"], "user", "hey")
         app = self.client.app
@@ -1569,10 +1593,12 @@ class MessageDeleteTests(unittest.TestCase):
 
         async def hold():
             async with turn:
-                return self.client.delete(f"/api/messages/{sent['id']}").status_code
+                return (self.client.delete(f"/api/messages/{sent['id']}").status_code,
+                        self.client.put(f"/api/messages/{sent['id']}", json={"content": "hi"}).status_code)
 
         import asyncio
-        self.assertEqual(asyncio.run(hold()), 409)
+        self.assertEqual(asyncio.run(hold()), (409, 409))
+        self.assertEqual(self.store.message(sent["id"])["content"], "hey")
         self.assertIsNotNone(self.store.message(sent["id"]))
 
 
