@@ -6,7 +6,9 @@ read an embedding of the turn:
 - your message, with her line before it: a lasting fact about you? (her memory of you)
 - her reply, with your message before it: something new and lasting about herself? (her bio)
 
-Only on a yes does her chat model write the fact, as one short line from those words alone. The embedding model
+Only on a yes does her chat model write the fact, as one short line from those words alone, or NONE when there is
+nothing lasting after all (a mood, a reaction, advice). A fact naming someone, somewhere or a number the chat never
+did is dropped: it was copied from the writer's examples. The embedding model
 then compares it with what she has, and a fact she already knows is not saved again. The chat text itself is never
 stored. A missed fact means you remind her; so the neurons speak only when fairly sure (0.5).
 
@@ -48,12 +50,19 @@ MAX_TOKENS = 512
 PAD = "<|endoftext|>"
 CONTEXT_START = "(start of the chat)"
 
-ABOUT_THEM = """Rewrite the last chat message as one short fact about the person who wrote it, for a memory list.
-Start with "They" or "Their" (for a moment the two of you share: "You and they"). Keep names, places and dates
-exactly as written. No emojis. Write only the fact.
+# Her chat model writes the fact, or NONE. The examples' names are made up and never in a real chat: a fact
+# naming someone or somewhere the chat did not is copied from here, and is dropped (see grounded).
+ABOUT_THEM = """Rewrite the last chat message as one short, lasting fact about the person who wrote it, for a memory
+list, or answer NONE.
+- Start with "They" or "Their" (for a moment the two of you share: "You and they").
+- Only what the Message itself says about them. The previous message only helps read a short answer; never take a
+  fact, advice or idea from it.
+- NONE when the message holds nothing lasting about them: small talk, a mood, a reaction, a question, what the
+  message is about, a request, or something only true today.
+- Keep names, places and dates exactly as written. No emojis. Write only the fact, or NONE.
 
-Message: "ugh my boss Neha made us redo the whole deck"
-Fact: Their boss is called Neha
+Message: "ugh my boss Oskarine made us redo the whole deck"
+Fact: Their boss is called Oskarine
 
 Previous message: "Do you have siblings?"
 Message: "two, both older"
@@ -62,28 +71,53 @@ Fact: They have two older siblings
 Message: "remember that I can't stand loud music"
 Fact: They can't stand loud music
 
-Message: "we finally watched Dil Chahta Hai together tonight, our first movie night"
-Fact: You and they had your first movie night watching Dil Chahta Hai
+Message: "lol you're so silly"
+Fact: NONE
+
+Message: "so tired today, long day"
+Fact: NONE
+
+Previous message: "Try warm milk before bed, it always works for me!"
+Message: "hmm ok maybe"
+Fact: NONE
+
+Message: "let's talk properly from now on"
+Fact: NONE
+
+Message: "we finally watched Zalvador Nights together, our first movie night"
+Fact: You and they had their first movie night watching Zalvador Nights
 
 {before}Message: "{text}"
 Fact:"""
 
-ABOUT_HER = """Rewrite the last chat message as one short fact about the woman who wrote it, about herself, for her
-bio. Start with "She" or "Her". Use only what this message says. Keep names, places and dates exactly as written.
-No emojis. Write only the fact.
+ABOUT_HER = """Rewrite the last chat message as one short, lasting fact about the woman who wrote it, about herself,
+for her bio, or answer NONE.
+- Start with "She" or "Her". Only what this message says about her own life, past, likes or family.
+- NONE for flirting, feelings in the moment, plans or ideas for the two of you, advice, questions, or anything
+  about the other person.
+- Keep names, places and dates exactly as written. No emojis. Write only the fact, or NONE.
 
 Previous message: "favourite fruit?"
-Message: "Mangoes!! alphonso only 🥭"
-Fact: Her favourite fruit is the Alphonso mango
+Message: "Jackfruit!! the sweet kind only"
+Fact: Her favourite fruit is sweet jackfruit
 
 Message: "I took swimming lessons every summer as a kid"
 Fact: She took swimming lessons every summer as a child
 
-Message: "my cousin Ria is basically my sister, we talk every day 💕"
-Fact: Her cousin Ria is like a sister to her, and they talk every day
+Message: "my cousin Ilvana is basically my sister, we talk every day 💕"
+Fact: Her cousin Ilvana is like a sister to her, and they talk every day
+
+Message: "Haha you're too cute 😘 Let's plan a movie night soon! 🍿"
+Fact: NONE
+
+Message: "When cravings hit, drink some water first, it really helps!"
+Fact: NONE
 
 {before}Message: "{text}"
 Fact:"""
+
+# Words a fact may start with or use that are not names: they need not be in the chat.
+NOT_NAMES = {"they", "their", "them", "she", "her", "you", "i", "none"}
 
 
 def query(who: str, text: str) -> str:
@@ -91,9 +125,22 @@ def query(who: str, text: str) -> str:
 
 
 def fact_line(answer: str) -> str:
-    """The writer's answer as one fact: its first line, without "Fact:", quotes or a list dash."""
+    """The writer's answer as one fact: its first line, without "Fact:", quotes or a list dash; "" for NONE."""
     line = answer.strip().splitlines()[0].strip() if answer.strip() else ""
-    return line.removeprefix("Fact:").strip().strip('"').removeprefix("- ").strip().rstrip(".")
+    line = line.removeprefix("Fact:").strip().strip('"').removeprefix("- ").strip().rstrip(".")
+    return "" if line.strip("*. ").upper() == "NONE" else line
+
+
+def grounded(fact: str, *said: str) -> bool:
+    """Whether every name, place and number in the fact was in what was said: "Their boss is Neha" from a chat
+    that never named Neha was copied from an example, not learnt."""
+    heard = " ".join(said).casefold()
+    words = re.findall(r"[A-Za-z][A-Za-z'’-]*|\d+", fact)
+    for index, word in enumerate(words):
+        if word.isdigit() or (word[0].isupper() and index > 0 and word.casefold() not in NOT_NAMES):
+            if word.casefold().rstrip("'’s") not in heard:
+                return False
+    return True
 
 
 def known_lines(companion: dict[str, Any], who: str) -> list[str]:
@@ -239,6 +286,10 @@ class Rememberer:
                 continue
             fact = await self.write(who, prior, text)
             if not fact:
+                continue
+            # About you, from your words (her line before only helps read a short answer); about her, from hers.
+            if not grounded(fact, text, prior if who == "you" else ""):
+                logger.info("Not in the chat, dropped: %s", fact)
                 continue
             companion = await asyncio.to_thread(self.store.companion, companion_id)
             if companion is None:

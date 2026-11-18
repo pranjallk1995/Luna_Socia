@@ -11,7 +11,7 @@ from app.chat import Conversation
 from app.images import ComfyUI
 from app.ollama import Ollama
 from app.persona import DEFAULT_PERSONA
-from app.remembering import SHIPPED_NEURONS, Neuron, Rememberer, fact_line, known_lines, load_neurons
+from app.remembering import SHIPPED_NEURONS, Neuron, Rememberer, fact_line, grounded, known_lines, load_neurons
 
 try:
     from test_socia import MemoryStore, config, fake_services, png
@@ -101,6 +101,26 @@ class RemembererTests(unittest.TestCase):
         self.assertEqual(self.store.companion(self.her["id"])["persona"]["about"],
                          "She is 25, from Mumbai.\nHer favourite colour is lavender.")
 
+    def test_nothing_lasting_is_none_and_not_saved(self):
+        rememberer = self.rememberer(lambda prompt: "Fact: NONE")
+        self.assertEqual(self.turn(rememberer, "", "my favourite part of today was that nap lol", "Haha cute"), [])
+        self.assertEqual(self.store.companion(self.her["id"])["memory"], "")
+        self.assertTrue(self.prompts)  # it was asked, and said there was nothing to keep
+
+    def test_a_name_the_chat_never_said_is_dropped(self):
+        # Copied from the writer's examples, not learnt from the chat.
+        rememberer = self.rememberer(lambda prompt: "Their boss is called Oskarine")
+        self.assertEqual(self.turn(rememberer, "How was work?", "my favourite boss quit today", "Oh no!"), [])
+        self.assertEqual(self.store.companion(self.her["id"])["memory"], "")
+
+    def test_names_places_and_numbers_must_be_in_the_chat(self):
+        self.assertTrue(grounded("Their sister Asha lives in Pune", "my sister asha lives in pune"))
+        self.assertTrue(grounded("They like the movie The Prestige", "watched prestige again", "the best one"))
+        self.assertTrue(grounded("They have two older siblings", "two, both older", "Do you have siblings?"))
+        self.assertTrue(grounded("Their cats are Maxi's daughters", "both are maxi's daughters"))
+        self.assertFalse(grounded("Their boss is Neha", "ugh my boss made us redo the deck"))
+        self.assertFalse(grounded("Their birthday is on 14 March", "guess when my birthday is in march"))
+
     def test_a_reply_without_words_is_not_read(self):
         rememberer = self.rememberer(lambda prompt: "Their sister is visiting")
         self.turn(rememberer, "", "my sister is visiting", "")
@@ -111,6 +131,8 @@ class RemembererTests(unittest.TestCase):
         self.assertEqual(fact_line('Fact: "They love pizza."\nThey also said...'), "They love pizza")
         self.assertEqual(fact_line("- Her favourite colour is lavender"), "Her favourite colour is lavender")
         self.assertEqual(fact_line(""), "")
+        self.assertEqual(fact_line("Fact: NONE"), "")
+        self.assertEqual(fact_line("**NONE**"), "")
 
     def test_what_she_has_is_her_memory_or_her_bio(self):
         her = {"memory": "- They love pizza\n- They have a cat", "persona": {"about": "She is 25. She loves chai!\nShe bakes."}}
