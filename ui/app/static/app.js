@@ -1053,6 +1053,7 @@ function handle(event, reply) {
       break;
     case "user":
       // The server has your message: it takes the place of the one still uploading.
+      reply.arrived = true;
       reply.pending?.remove();
       append(event.message);
       list.append(reply.element);
@@ -1150,6 +1151,11 @@ async function send(words) {
       // It never arrived: the photo goes back into the composer to send again.
       reply.pending.remove();
       restorePhoto(photos, message);
+    } else if (!reply.arrived && message && !text.value) {
+      // Your words never reached her: they go back into the box, to send again.
+      text.value = message;
+      resize();
+      saveDraft();
     }
     if (!reply.element.isConnected) list.append(reply.element);
     handle({ type: "error", text: error.message }, reply);
