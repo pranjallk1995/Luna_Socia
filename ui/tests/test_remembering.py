@@ -194,6 +194,38 @@ class ConversationRemembersTests(unittest.TestCase):
         events = self.run_turn("Cute! 😍", "my favourite photo", photo=png("red"))
         self.assertNotIn("remembered", [e["type"] for e in events])
 
+    def test_she_reads_the_part_of_her_memory_recall_chose(self):
+        self.store.update_companion(self.her["id"], {"memory": "- Their cat is Biscuit\n- They love rain"})
+
+        class Recall:
+            upkept = []
+
+            async def memory(self, companion, message):
+                self.message = message
+                return "- Their cat is Biscuit"
+
+            async def upkeep(self, companion_id):
+                self.upkept.append(companion_id)
+
+        recall = Recall()
+        seen = {}
+        transport, comfy = fake_services([[{"content": "Morning! ☀️"}]], seen)
+        conversation = Conversation(self.config, self.store, Ollama(self.config, transport),
+                                    ComfyUI(self.config, comfy), recall=recall)
+
+        async def collect():
+            companion = self.store.companion(self.her["id"])
+            events = [e async for e in conversation.send(companion, None, "good morning", None, "Sam", "Asia/Kolkata")]
+            await asyncio.gather(*conversation.upkeeps)
+            return events
+
+        asyncio.run(collect())
+        prompt = next(c for c in seen["chats"] if c.get("stream", True))["messages"][0]["content"]
+        self.assertIn("- Their cat is Biscuit", prompt)
+        self.assertNotIn("They love rain", prompt)
+        self.assertEqual(recall.message, "good morning")
+        self.assertEqual(recall.upkept, [self.her["id"]])
+
 
 if __name__ == "__main__":
     unittest.main()

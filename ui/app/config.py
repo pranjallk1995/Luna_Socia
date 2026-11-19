@@ -52,6 +52,15 @@ class SociaConfig:
     # What she remembers about the owner goes into every reply, so it stays short:
     # about 1,200 tokens of the 8k context.
     MEMORY_CHARS: ClassVar[int] = 4800
+    # What she reads of it for one reply (app/recall.py, from notebooks/04_memory_recall): every core line (name,
+    # family, pets, home, work, dates), and the details your message is about: up to RECALL_LINES whose embedding is
+    # at least RECALL_THRESHOLD close to it. All of it within MEMORY_TOKENS.
+    MEMORY_TOKENS: ClassVar[int] = 500
+    RECALL_THRESHOLD: ClassVar[float] = 0.5
+    RECALL_LINES: ClassVar[int] = 6
+    # Past this many details, the weakest fades: a detail grows stronger each time she reads it, and weaker with
+    # time since (ACT-R's base-level activation). Core lines never fade.
+    MEMORY_DETAILS: ClassVar[int] = 60
     # Her private notes for one chat: a line is at most NOTE_CHARS, and the oldest lines go past NOTES_CHARS.
     NOTE_CHARS: ClassVar[int] = 300
     NOTES_CHARS: ClassVar[int] = 1500

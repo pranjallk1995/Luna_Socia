@@ -356,10 +356,13 @@ def ago(count: int) -> str:
 
 class Conversation:
     def __init__(self, config: SociaConfig, store: SociaStore, ollama: Ollama, comfy: ComfyUI,
-                 apps: LunaApps | None = None, faces: Faces | None = None, rememberer: Any = None) -> None:
+                 apps: LunaApps | None = None, faces: Faces | None = None, rememberer: Any = None,
+                 recall: Any = None) -> None:
         self.config = config
         # Decides after each text turn what is worth remembering (app/remembering.py); None leaves it to her tool.
         self.rememberer = rememberer
+        self.recall = recall
+        self.upkeeps: set[asyncio.Task] = set()
         # Face recognition, paired with the vision model: whose faces are in the pictures it sees.
         self.faces = faces
         self.store = store
@@ -594,6 +597,13 @@ class Conversation:
             # picked for a guessing game while answering a photo. Her notes wait for her next text reply.
             notes = ""
         owner = await asyncio.to_thread(self.store.owner_profile)
+        if self.recall is not None and companion.get("memory"):
+            # Her core memories, and the details your message is about (app/recall.py).
+            said = (rows[-1]["content"] or "") if rows and rows[-1]["role"] == "user" else ""
+            try:
+                companion = {**companion, "memory": await self.recall.memory(companion, " ".join(said.split()))}
+            except Exception:  # noqa: BLE001 - she reads all of it instead
+                logger.exception("Could not recall by topic")
         prompt = system_prompt(companion, name, self.now(timezone), await self.looks(companion["id"]), notes,
                                owner.get("about") or "")
         tools = TOOLS
@@ -759,7 +769,17 @@ class Conversation:
 
         saved = await asyncio.to_thread(self.store.add_message, chat_id, "luna", text.strip(), image_id, None, used_apps,
                                         remembered or None)
+        if self.recall is not None:
+            # Sorting new lines and forgetting the weakest, after she has answered.
+            task = asyncio.create_task(self.recall.upkeep(companion["id"]))
+            self.upkeeps.add(task)
+            task.add_done_callback(self.upkept)
         yield {"type": "done", "message": serialize(saved)}
+
+    def upkept(self, task: asyncio.Task) -> None:
+        self.upkeeps.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.error("Her memory's upkeep failed", exc_info=task.exception())
 
     async def remember(self, companion_id: int, calls: list[dict[str, Any]]) -> list[dict[str, str]]:
         """The facts she chose to remember, added to her memory for every chat; the ones that are new, each with

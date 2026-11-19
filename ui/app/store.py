@@ -137,6 +137,19 @@ CREATE TABLE IF NOT EXISTS apps_connection (
 ALTER TABLE memory_sources DROP CONSTRAINT IF EXISTS memory_sources_source_check;
 ALTER TABLE memory_sources ADD CONSTRAINT memory_sources_source_check CHECK (source IN ('chatgpt', 'claude', 'socia'));
 ALTER TABLE chats ADD COLUMN IF NOT EXISTS remembered_to BIGINT NOT NULL DEFAULT 0;
+-- Each line of her memory of the owner, as she reads it: its embedding (to find it when a message is about it),
+-- its kind from her chat model ('' not sorted yet, 'core' always read, 'detail' read when a message brings it up,
+-- 'junk' never read) and every time she read it, from when she learnt it. The memory text stays what the owner
+-- sees and edits; a row whose line is no longer in it is dropped.
+CREATE TABLE IF NOT EXISTS memory_lines (
+    companion_id BIGINT NOT NULL REFERENCES companions(id) ON DELETE CASCADE,
+    line TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT '',
+    vector BYTEA NOT NULL,
+    recalls TIMESTAMPTZ[] NOT NULL DEFAULT ARRAY[now()],
+    PRIMARY KEY (companion_id, line)
+);
+
 -- The owner as every girlfriend knows them: the name she calls them ('' for their sign-in's first
 -- name) and what they wrote about themselves. One row.
 CREATE TABLE IF NOT EXISTS owner_profile (
@@ -301,6 +314,44 @@ class SociaStore:
             db.execute("UPDATE companions SET memory = %s, updated_at = now() WHERE id = %s",
                        ("\n".join(lines), companion_id))
             return True
+
+    # Her memory, line by line (app/recall.py)
+
+    def memory_lines(self, companion_id: int) -> list[dict[str, Any]]:
+        with self.connect() as db:
+            return db.execute("SELECT line, kind, vector, recalls FROM memory_lines WHERE companion_id = %s",
+                              (companion_id,)).fetchall()
+
+    def add_memory_lines(self, companion_id: int, lines: list[tuple[str, bytes]]) -> None:
+        with self.connect() as db, db.transaction():
+            for line, vector in lines:
+                db.execute("INSERT INTO memory_lines (companion_id, line, vector) VALUES (%s, %s, %s) "
+                           "ON CONFLICT DO NOTHING", (companion_id, line, vector))
+
+    def sort_memory_line(self, companion_id: int, line: str, kind: str) -> None:
+        with self.connect() as db:
+            db.execute("UPDATE memory_lines SET kind = %s WHERE companion_id = %s AND line = %s",
+                       (kind, companion_id, line))
+
+    def recalled(self, companion_id: int, lines: list[str]) -> None:
+        """She read these lines for a reply: each is a little stronger."""
+        with self.connect() as db:
+            db.execute("UPDATE memory_lines SET recalls = array_append(recalls, now()) "
+                       "WHERE companion_id = %s AND line = ANY(%s)", (companion_id, lines))
+
+    def fade(self, companion_id: int, lines: list[str], keep: list[str]) -> None:
+        """Forget these lines from her memory, and drop the rows of lines no longer in it (``keep`` is what is)."""
+        gone = {line.casefold() for line in lines}
+        with self.connect() as db, db.transaction():
+            row = db.execute("SELECT memory FROM companions WHERE id = %s FOR UPDATE", (companion_id,)).fetchone()
+            if row is None:
+                return
+            if gone:
+                kept = [l for l in row["memory"].splitlines() if l.removeprefix("- ").strip().casefold() not in gone]
+                db.execute("UPDATE companions SET memory = %s, updated_at = now() WHERE id = %s",
+                           ("\n".join(kept), companion_id))
+            db.execute("DELETE FROM memory_lines WHERE companion_id = %s AND (line = ANY(%s) OR NOT line = ANY(%s))",
+                       (companion_id, lines, keep))
 
     def add_to_bio(self, companion_id: int, facts: list[str], limit: int) -> list[str]:
         """What she said about herself, added to her bio (persona "about") as sentences, unless already there and
