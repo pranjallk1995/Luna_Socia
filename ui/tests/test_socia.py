@@ -900,7 +900,7 @@ class ConversationTests(unittest.TestCase):
         # The vision model answers as her, seeing the photo itself, at its own context. Not her profile picture:
         # as picture 1 she took it for one of his photos and said "the first one is me" every time (17 November).
         first = streamed(seen)[0]
-        self.assertEqual((first["model"], first["options"]["num_ctx"]), (self.config.vision_model, 8192))
+        self.assertEqual((first["model"], first["options"]["num_ctx"]), (self.config.vision_model, self.config.vision_context_tokens))
         self.assertEqual(len(first["messages"][-1]["images"]), 1)
         self.assertIn("[Pictures you see now: 1) the photo Pranjall sent just now", first["messages"][-1]["content"])
         self.assertNotIn("profile picture", first["messages"][-1]["content"])
@@ -912,9 +912,9 @@ class ConversationTests(unittest.TestCase):
         sent = next(m for m in self.store.messages if m["role"] == "user")
         self.assertEqual(sent["photo_note"], "A red square.")
         looks = [c for c in seen["completions"] if c["model"] == self.config.vision_model]
-        self.assertEqual({c["options"]["num_ctx"] for c in looks}, {8192})
+        self.assertEqual({c["options"]["num_ctx"] for c in looks}, {self.config.vision_context_tokens})
         # The vision model starts loading first, while the pictures are got ready.
-        self.assertEqual(seen["unloaded"][0], {"model": self.config.vision_model, "options": {"num_ctx": 8192}})
+        self.assertEqual(seen["unloaded"][0], {"model": self.config.vision_model, "options": {"num_ctx": self.config.vision_context_tokens}})
         # Then the vision model leaves the GPU and her chat model comes back, before her next reply.
         self.assertEqual(seen["unloaded"][-2:], [{"model": self.config.vision_model, "keep_alive": 0},
                                                  {"model": self.config.chat_model, "options": {"num_ctx": 8192}}])

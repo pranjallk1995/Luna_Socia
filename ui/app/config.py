@@ -82,8 +82,9 @@ class SociaConfig:
     # SENTIA_RESIDENT_CONTEXT, or Ollama reloads the model for every reply.
     context_tokens: int = 8192
     # The vision model's context. It sees the photos and answers as her, with her prompt and the
-    # last PHOTO_HISTORY_MESSAGES messages: 8k holds that and three photos.
-    vision_context_tokens: int = 8192
+    # last PHOTO_HISTORY_MESSAGES messages. 16k, the context every Luna app asks this shared model
+    # for, so Ollama does not reload it between a photo and another app's call (8k would hold it all).
+    vision_context_tokens: int = 16384
     temperature: float = 0.8
     # Qwen-Image 2.1's pixel budget: about resolution x resolution, keeping the aspect ratio.
     image_resolution: int = 1024
