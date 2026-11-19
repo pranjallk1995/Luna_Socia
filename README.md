@@ -39,7 +39,7 @@ Socia is one service (`ui`): the page and its API, behind Luna's single sign-on.
 | Voice messages | faster-whisper `LUNASOCIA_STT_MODEL` (default `large-v3-turbo`, int8/float16) | Here, on the GPU (`LUNASOCIA_VOICE_DEVICE`, default `cuda`; `cpu` to keep it off the GPU), loaded at start | A few voice messages by hand |
 | Her voice | Kokoro 82M, in the voice chosen for her (16 female English and Hindi voices; `LUNASOCIA_TTS_VOICE`, default `af_heart`, for new girlfriends) | Here, on the GPU with Whisper (about 1.5 GB for both, and 0.2 GB for CUDA), loaded at start. Socia measures what each model takes as it loads and reports it to Sentia's monitor | Listen to a few replies |
 | Her memory | The chat model reads imported ChatGPT or Claude chats for facts about you, in the background; reading her own chats too is off until it is reliable (`LUNASOCIA_READ_CHATS=1`) | Sentia's Ollama, on the GPU, only while no reply is being written | `model_evaluations/remember.py`, then import a small export and read what she remembers |
-| What she remembers by herself | Qwen3-Embedding 0.6B (ONNX, `onnx-community/Qwen3-Embedding-0.6B-ONNX`) embeds your message and her reply, each with the line before it, and two small neurons decide whether either holds a lasting fact. The chat model then writes it in one line (`LUNASOCIA_REMEMBER_AUTO`, default on) | Here, on the CPU (`LUNASOCIA_REMEMBER_DEVICE`, default `cpu`: 2.4 GB of RAM, about 0.4 s a turn; `cuda`: 1.2 GB of the GPU), loaded at start. Downloaded once to the data volume | Notebook 03, Part B: the neurons are trained on its embeddings, so train them again |
+| What she remembers by herself | Qwen3-Embedding 0.6B (ONNX, `onnx-community/Qwen3-Embedding-0.6B-ONNX`) embeds your message and her reply, each with the line before it, and two small neurons decide whether either holds a lasting fact. The chat model then writes it in one line (`LUNASOCIA_REMEMBER_AUTO`, default on). The same model finds the lines of her memory your message is about | Here, on the CPU (`LUNASOCIA_REMEMBER_DEVICE`, default `cpu`: 2.4 GB of RAM, about 0.4 s a turn; `cuda`: 1.2 GB of the GPU), loaded at start. Downloaded once to the data volume | Notebook 03, Part B: the neurons are trained on its embeddings, so train them again |
 
 ## The models in Socia itself
 
@@ -78,7 +78,7 @@ the owner only. Its models run on the home's one GPU, and she can act in every L
 | Docling (layout, tables, OCR) | Lexia itself, GPU or CPU | Lexia's page reading | Pinned in Lexia's image |
 | Whisper `large-v3-turbo`, Kokoro 82M | Socia itself, GPU (about 1.5 GB, and 0.2 GB for CUDA, loaded at start) or CPU | Socia's voice messages and Luna's voice (`LUNASOCIA_STT_MODEL`, `LUNASOCIA_TTS_VOICE`, `LUNASOCIA_VOICE_DEVICE`) | Listen to a few replies; downloaded on first use |
 | InsightFace `buffalo_l` (SCRFD, ArcFace) | Socia itself, GPU (about 0.4 GB, loaded with the vision model for a photo) or CPU | Whose faces are in a photo, Luna's or the owner's, told to her vision model | Socia's `model_evaluations/self_recognition.py`; non-commercial licence |
-| Qwen3-Embedding 0.6B (ONNX, `onnx-community/Qwen3-Embedding-0.6B-ONNX`) | Socia itself, CPU (2.4 GB of RAM, about 0.4 s a turn) or GPU (1.2 GB), loaded at start | Whether a message holds a lasting fact Luna should remember, about the owner or herself (`LUNASOCIA_REMEMBER_AUTO`, `LUNASOCIA_REMEMBER_DEVICE`) | Socia's notebook 03, Part B: its neurons are trained on this model's embeddings |
+| Qwen3-Embedding 0.6B (ONNX, `onnx-community/Qwen3-Embedding-0.6B-ONNX`) | Socia itself, CPU (2.4 GB of RAM, about 0.4 s a turn) or GPU (1.2 GB), loaded at start | Whether a message holds a lasting fact Luna should remember, about the owner or herself, and which of her memories a message is about (`LUNASOCIA_REMEMBER_AUTO`, `LUNASOCIA_REMEMBER_DEVICE`) | Socia's notebook 03, Part B: its neurons are trained on this model's embeddings |
 <!-- luna-models:end -->
 
 Every Luna app but Luna Socia is a React UI plus a FastMCP service on Luna Sentia's
@@ -111,7 +111,8 @@ play music, dim the lights or find a photo from the chat.
 1. What you send is stored in the `lunasocia` database, in its chat: your first message in a
    new chat starts it and names it.
 2. Her reply streams from the chat model, with her persona (`ui/app/persona.py`), what she
-   remembers about you (`ui/app/memory.py`), and the last 20 messages of this chat. Her own
+   remembers about you (its core lines, and the details your message is about: `ui/app/recall.py`),
+   and the last 20 messages of this chat. Her own
    looks, described once from her profile picture, are part of it.
    - **With a photo**, or a question about one from the last 4 messages ("which one is
      better?", "what did I circle?"), the vision model answers instead. It sees the chat's last
@@ -166,7 +167,7 @@ Your picture at the top right, on every page, opens what every girlfriend knows 
 Upload the export ChatGPT or Claude emails you (the .zip, or the `conversations.json` inside
 it) in "Edit her". Socia keeps every conversation in `memory_sources`, then the chat model reads
 your own messages in each one (not the assistant's) for lasting facts, about 2 s a conversation,
-and merges them into a short list that goes into every reply (up to 4,800 characters). Reading
+and merges them into a short list (up to 4,800 characters). Reading
 pauses while she answers you; the form shows its progress, and you can edit what she
 remembers. Importing the same export again skips the conversations she already has.
 
@@ -190,6 +191,21 @@ embedding model compares it with what she already has, so a fact she knows isn't
   `neurons.npz` to `/data/remember/neurons.npz`; Socia then uses yours.
 - **Turning it off:** `LUNASOCIA_REMEMBER_AUTO=0` leaves it to her tool alone.
 
+**What she reads for a reply.** Her whole memory in every reply made her bring it up in small talk,
+so each line is sorted once by her chat model, after a turn (`ui/app/recall.py`, from
+[notebook 04](notebooks/04_memory_recall.py)):
+- **Core** (who you are: family, pets, home, work, health, dates, how you met): always read.
+- **Detail** (a like, a habit, a plan): read only when your message is about it. The embedding
+  model compares your message with each detail, and up to 6 that are at least 0.5 alike come in.
+  "lol" or "good morning" bring up none.
+- **Junk** (not a lasting fact, such as "Their message was..."): never read.
+- A line not sorted yet is read as core. All she reads stays within 500 tokens.
+
+**What she forgets.** Each time a detail is read it grows stronger, and it weakens with time
+(ACT-R's base-level activation: the log of the sum of each read's age in days to the power
+-0.5). Past 60 details, junk goes first, then the weakest. Core lines are never forgotten. What
+you see and edit in "Edit her" is still her whole memory.
+
 **Refresh**, beside what she remembers in "Edit her", loads the facts saved in chats since you
 opened it. Notebook 03 also has a LoRA fine-tune of her chat model, the other way it tries.
 
@@ -203,7 +219,9 @@ Send text, a voice message (the microphone), or up to 3 photos at once: choose t
 photo button, or paste one with Ctrl+V. A photo shows straight away with how much of it has
 uploaded. On a desktop, the smiley beside it opens an emoji picker. React to a message with an
 emoji, or double-tap hers for a heart; she reacts to yours too. Each of her replies can be
-read aloud, and any picture downloaded.
+read aloud, and any picture downloaded. The pencil beside your message changes its words, marked
+"edited"; she reads the new words from her next reply on. The × beside a fact under
+"Remembered:" takes it out of her memory or bio.
 
 ## Her phone: your Luna apps
 
@@ -286,7 +304,7 @@ for this GPU (`/data/models/cuda-cache`): the first start compiles them, in abou
 
 The database keeps each girlfriend (`companions`: persona, voice, memory), her chats (`chats`,
 with their `messages` and `images`), and the conversations imported into her memory
-(`memory_sources`), the owner's name and details (`owner_profile`), and its sign-in to your Luna apps (`apps_connection`). Every chat is kept, so her long-term memory can draw on all of them. On a
+(`memory_sources`), each memory line's kind, embedding and reads (`memory_lines`), the owner's name and details (`owner_profile`), and its sign-in to your Luna apps (`apps_connection`). Every chat is kept, so her long-term memory can draw on all of them. On a
 desktop, her chats are listed beside the conversation, and on a wide screen her profile is on
 the other side; on a phone, open the list from the menu button at the top left. Start a new
 chat with the pencil, and rename or delete a chat from the list. Deleting a chat removes its
@@ -317,7 +335,8 @@ beside the running Socia (`.devcontainer/`, with no Jupyter server or port), and
 chat as each model reads it, the tokens, and the GPU while each step runs. `01_photo_flow`
 follows a photo to her reply, with the faces found in it and whose they are; `02_picture_flow` follows a picture from her call to ComfyUI;
 `03_remember_training` teaches her when to remember: your labels, the LoRA fine-tune, and the
-classifier, each against the same baseline. It has its own kernel, **Luna training (torch)**, and
+classifier, each against the same baseline. `04_memory_recall` compares what she reads of her
+memory (all of it, or core lines with what a message brings up) and what she forgets, on made-up data. It has its own kernel, **Luna training (torch)**, and
 keeps the models it downloads in the `luna_socia_training` volume.
 Open them with **Dev Containers: Reopen in Container**. Their outputs (your chats and her pictures) are never
 committed.
@@ -327,5 +346,5 @@ committed.
 ```bash
 docker compose build ui
 docker run --rm --network none --entrypoint python -v "$PWD/ui/tests:/workspace/ui/tests:ro" \
-  ghcr.io/pranjallk1995/luna-socia-ui:v1.2.0 -m unittest discover -s tests
+  ghcr.io/pranjallk1995/luna-socia-ui:v1.3.0 -m unittest discover -s tests
 ```
