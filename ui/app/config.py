@@ -39,6 +39,9 @@ class SociaConfig:
     FACES_NAMED: ClassVar[int] = 4
     MAX_OWNER_PHOTOS: ClassVar[int] = 5
     PHOTOS_SEEN: ClassVar[int] = 3
+    # An earlier picture is shown again, for context only, while it still counts this much (app/chat.py recency):
+    # 0.5 is up to 3 messages ago.
+    PICTURE_RECENCY: ClassVar[float] = 0.5
     PHOTO_SEEN_SIDE: ClassVar[int] = 1024
     # The longest one image may take, including loading the model from disk.
     IMAGE_TIMEOUT_SECONDS: ClassVar[float] = 600.0
