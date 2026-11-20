@@ -13,6 +13,12 @@
   <img src="ui/app/static/logo.png" alt="Luna Socia" width="160">
 </p>
 
+<p align="center">
+  <a href="docs/assets/luna-socia-showcase.mp4"><img src="docs/assets/luna-socia-showcase.webp" alt="From Google sign-in through Luna Unia to creating a girlfriend in Luna Socia, chatting as a made-up user, and her remembering his news and a promise by herself, into a new chat and her memory" width="900"></a>
+</p>
+
+<p align="center"><em>A made-up user and girlfriend: she remembers what matters by herself, carries it into a new chat, and shows it in her memory, where you can edit it. Select it for the sharper video.</em></p>
+
 ## Text, talk and share photos with your AI girlfriends
 
 > Luna Socia is a local-first, private chat with the AI girlfriends you create: text, voice
