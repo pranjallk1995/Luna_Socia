@@ -14,10 +14,10 @@
 </p>
 
 <p align="center">
-  <a href="docs/assets/luna-socia-showcase.mp4"><img src="docs/assets/luna-socia-showcase.webp" alt="From Google sign-in through Luna Unia to creating a girlfriend in Luna Socia, chatting as a made-up user, and her remembering his news and a promise by herself, into a new chat and her memory" width="900"></a>
+  <a href="docs/assets/luna-socia-showcase.mp4"><img src="docs/assets/luna-socia-showcase.webp" alt="From Google sign-in through Luna Unia to creating a girlfriend in Luna Socia, chatting as a made-up user, her remembering his promise by herself, describing his latte art, naming who is who in a photo of the two of them, and carrying the promise into a new chat and her memory" width="900"></a>
 </p>
 
-<p align="center"><em>A made-up user and girlfriend: she remembers what matters by herself, carries it into a new chat, and shows it in her memory, where you can edit it. Select it for the sharper video.</em></p>
+<p align="center"><em>A made-up user and girlfriend: she remembers what matters by herself, sees the photos you send and knows whose faces are in them, carries what she remembers into a new chat, and shows it in her memory, where you can edit it. Select it for the sharper video.</em></p>
 
 ## Text, talk and share photos with your AI girlfriends
 
