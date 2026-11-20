@@ -7,7 +7,7 @@
 ![PostgreSQL in Luna Sentia](https://img.shields.io/badge/PostgreSQL-in_Luna_Sentia-4169E1?logo=postgresql&logoColor=white)
 ![NVIDIA GPU required](https://img.shields.io/badge/NVIDIA_GPU-required-76B900?logo=nvidia&logoColor=white)
 ![Owner only](https://img.shields.io/badge/Access-owner_only-8A2BE2)
-![Status: v1.3](https://img.shields.io/badge/Status-v1.3-2EA043)
+![Status: v1.4](https://img.shields.io/badge/Status-v1.4-2EA043)
 
 <p align="center">
   <img src="ui/app/static/logo.png" alt="Luna Socia" width="160">
