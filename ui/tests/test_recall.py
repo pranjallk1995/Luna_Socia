@@ -25,11 +25,13 @@ class Tokenizer:
 class Embedder:
     """A line or a message points along the topics it names; nothing else."""
 
+    model = "fake-embedding"
+
     def __init__(self):
         self.tokenizer, self.lock = Tokenizer(), threading.Lock()
 
-    def load(self):
-        pass
+    def count(self, text):
+        return len(self.tokenizer.encode(text).ids)
 
     def vectors(self, texts):
         out = np.zeros((len(texts), len(TOPICS) + 1), dtype=np.float32)
@@ -52,9 +54,10 @@ class Store:
     def memory_lines(self, companion_id):
         return [{"line": line, **row} for line, row in self.rows.items()]
 
-    def add_memory_lines(self, companion_id, lines):
+    def add_memory_lines(self, companion_id, model, lines):
         for line, vector in lines:
-            self.rows.setdefault(line, {"kind": "", "vector": vector, "recalls": [datetime.now(timezone.utc)]})
+            row = self.rows.setdefault(line, {"kind": "", "recalls": [datetime.now(timezone.utc)]})
+            row.update(vector=vector, embedded_by=model)
 
     def sort_memory_line(self, companion_id, line, kind):
         self.rows[line]["kind"] = kind
@@ -124,6 +127,17 @@ class RecallTest(unittest.TestCase):
         left = lines_of(self.store.companion_["memory"])
         self.assertEqual(left, ["Their cat is called Biscuit", "They work as a data engineer",
                                 "Their favourite movie is Interstellar", "They love masala dosa food"])
+
+    def test_a_line_from_an_earlier_embedding_model_is_embedded_again_and_keeps_its_kind_and_recalls(self):
+        asyncio.run(self.recall.upkeep(1))
+        line = "Their favourite movie is Interstellar"
+        old = datetime.now(timezone.utc) - timedelta(days=3)
+        self.store.rows[line].update(embedded_by="", vector=np.zeros(len(TOPICS) + 1, np.float32).tobytes(), recalls=[old])
+        read = asyncio.run(self.recall.memory(self.store.companion_, "watching a movie tonight, suggest one?"))
+        self.assertIn(f"- {line}", read)
+        self.assertEqual(self.store.rows[line]["embedded_by"], "fake-embedding")
+        self.assertEqual(self.store.rows[line]["kind"], "detail")
+        self.assertEqual(self.store.rows[line]["recalls"][0], old)
 
 
 class PartsTest(unittest.TestCase):

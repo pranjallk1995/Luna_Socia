@@ -63,7 +63,7 @@ def main() -> None:
     rememberer = recall = None
     if config.remember_auto:
         rememberer = Rememberer(config, store, ollama.complete)
-        # The embedding model downloads (once) and loads beside her voice, not at the first reply.
+        # The embedding model is Ollama's; its tokenizer downloads (once) at start, not at the first reply.
         threading.Thread(target=rememberer.preload, name="remember-preload", daemon=True).start()
         # Her memory read by topic, with the same embedding model.
         recall = Recall(store, rememberer.embedder, ollama.complete)

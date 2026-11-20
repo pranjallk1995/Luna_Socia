@@ -72,14 +72,14 @@ config = SociaConfig.from_env()
 ollama = Ollama(config)
 RESULTS = Path("/workspace/notebooks/results/memory")
 RESULTS.mkdir(parents=True, exist_ok=True)
-tokenizer = rc.embedder()[0]  # Qwen3's tokenizer: her chat model counts the same way
+tokenizer = rc.tokenizer()  # Qwen3's tokenizer: her chat model counts the same way
 
 
 def tokens(text: str) -> int:
     return len(tokenizer(text)["input_ids"])
 
 
-print("chat model:", config.chat_model, "| embedder on", rc.embedder()[2])
+print("chat model:", config.chat_model, "| embedding model:", config.embed_model, "in Ollama")
 
 # %% [markdown]
 # ## 1 · Made-up memories

@@ -29,9 +29,9 @@ services:
       # cuda: her voice on the GPU, loaded at start; cpu: on the CPU, as before.
       LUNASOCIA_VOICE_DEVICE: ${LUNASOCIA_VOICE_DEVICE:-cuda}
       # After each text turn, a small classifier decides what she remembers about you and herself (0 turns it off);
-      # its embedding model (Qwen3-Embedding 0.6B) runs on the cpu (2.4 GB of RAM) or cuda (1.2 GB of GPU memory).
+      # its embedding model is Ollama's (the one Lexia's search uses), and finds what of her memory a message is about.
       LUNASOCIA_REMEMBER_AUTO: ${LUNASOCIA_REMEMBER_AUTO:-1}
-      LUNASOCIA_REMEMBER_DEVICE: ${LUNASOCIA_REMEMBER_DEVICE:-cpu}
+      LUNASOCIA_EMBED_MODEL: ${LUNASOCIA_EMBED_MODEL:-qwen3-embedding:0.6b}
       # Luna Sentia's model monitor asks with it about the voice models; same value there.
       LUNASOCIA_API_TOKEN: ${LUNASOCIA_API_TOKEN:-lunasocia-dev-token-for-localhost-only}
       TZ: Asia/Kolkata

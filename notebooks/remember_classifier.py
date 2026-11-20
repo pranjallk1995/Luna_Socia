@@ -1,7 +1,7 @@
 """Part B of notebook 03: deciding *when* to remember with a small classifier, not by training her chat model.
 
-1. A small embedding model (Qwen3-Embedding-0.6B, about 1.2 GB, run here with transformers) turns a message, with
-   the line before it, into 1,024 numbers. (Ollama has the same model, but its engine hung loading it on 17 Nov.)
+1. A small embedding model (Qwen3-Embedding 0.6B, Ollama's ``qwen3-embedding:0.6b``, the one Socia and Lexia use)
+   turns a message, with the line before it, into 1,024 numbers.
    The line before is embedded apart from the message, and the neuron reads both side by side (2 x 1,024).
 2. Two tiny classifiers (logistic regression: one "neuron" each) read those numbers:
    - on your messages: is there a lasting fact about you? (them / none)
@@ -37,8 +37,10 @@ from app.store import SociaStore
 GENERATED = Path(__file__).parent / "results" / "remember" / "generated.jsonl"
 # Lines from your own chats, labelled for training (same format, with "chat"): those chats are left out of the test.
 FROM_CHATS = Path(__file__).parent / "results" / "remember" / "from_chats.jsonl"
-EMBED_MODEL = "Qwen/Qwen3-Embedding-0.6B"
-EMBED_CACHE = Path("/training/hf/hub")
+# The embedding model in Ollama, as Socia reads it (LUNASOCIA_EMBED_MODEL); its tokenizer for counting tokens.
+EMBED_MODEL = SociaConfig.embed_model
+TOKENIZER = "Qwen/Qwen3-Embedding-0.6B"
+TOKENIZER_CACHE = Path("/training/hf/hub")
 TASKS = {
     "you": "Decide whether the message states a lasting fact about the person who wrote it, worth remembering",
     "her": "Decide whether the message states a new, lasting fact about the woman who wrote it, about herself",
@@ -107,23 +109,16 @@ def query(row: dict[str, Any]) -> str:
 
 # ----------------------------------------------------------------------------------------------- embed
 
-_embedder: dict[str, Any] = {}
+_tokenizer: list[Any] = []
 
 
-def embedder():
-    """The embedding model and its tokenizer, loaded once (on the GPU if there is room, else the CPU)."""
-    if not _embedder:
-        import torch
-        from transformers import AutoModel, AutoTokenizer
+def tokenizer():
+    """Qwen3's tokenizer (her chat model counts the same way), loaded once: only the tokenizer, a few MB."""
+    if not _tokenizer:
+        from transformers import AutoTokenizer
 
-        device = "cuda" if torch.cuda.is_available() and torch.cuda.mem_get_info()[0] > 2 * 2**30 else "cpu"
-        # Into the training volume: HF_HOME from Socia's settings points at /data, read-only here.
-        cache = str(EMBED_CACHE)
-        tokenizer = AutoTokenizer.from_pretrained(EMBED_MODEL, padding_side="left", cache_dir=cache)
-        model = AutoModel.from_pretrained(EMBED_MODEL, dtype=torch.float16 if device == "cuda" else torch.float32,
-                                          cache_dir=cache)
-        _embedder.update(tokenizer=tokenizer, model=model.to(device).eval(), device=device)
-    return _embedder["tokenizer"], _embedder["model"], _embedder["device"]
+        _tokenizer.append(AutoTokenizer.from_pretrained(TOKENIZER, cache_dir=str(TOKENIZER_CACHE)))
+    return _tokenizer[0]
 
 
 def embed(config: SociaConfig | None, rows: list[dict[str, Any]], batch: int = 32, plain: bool = False):
@@ -141,19 +136,17 @@ def embed(config: SociaConfig | None, rows: list[dict[str, Any]], batch: int = 3
 
 
 def _vectors(texts: list[str], batch: int = 32):
-    """Unit-length vectors: the embedding model's last token, as Qwen3-Embedding is meant to be read."""
+    """Unit-length vectors from Ollama's embedding model (the last token, as Qwen3-Embedding is meant to be read),
+    the same numbers Socia gets."""
     import torch
 
-    import torch
-
-    tokenizer, model, device = embedder()
+    config = SociaConfig.from_env()
     vectors = []
-    with torch.no_grad():
+    with httpx.Client(base_url=config.ollama_url, headers={"X-Luna-App": "socia"}, timeout=300) as client:
         for start in range(0, len(texts), batch):
-            chunk = texts[start:start + batch]
-            tokens = tokenizer(chunk, padding=True, truncation=True, max_length=512, return_tensors="pt").to(device)
-            hidden = model(**tokens).last_hidden_state[:, -1]
-            vectors.append(torch.nn.functional.normalize(hidden.float(), dim=1).cpu())
+            response = client.post("/api/embed", json={"model": config.embed_model, "input": texts[start:start + batch]})
+            response.raise_for_status()
+            vectors.append(torch.nn.functional.normalize(torch.tensor(response.json()["embeddings"]), dim=1))
     return torch.cat(vectors)
 
 

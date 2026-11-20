@@ -407,9 +407,10 @@ print("new model:", NEW_MODEL)
 # her reply   (+ your message)        ─► embedding model ─► neuron "new fact about her?" ─► yes ─► her model writes "She …"
 # ```
 #
-# - **The embedding model** is `Qwen3-Embedding-0.6B`, run here with transformers: a 1.2 GB download
-#   into `/training`, on the GPU beside her chat model. It turns a line into 1,024 numbers. Ollama has
-#   it too, but Ollama's engine hung loading it on 17 Nov.
+# - **The embedding model** is Qwen3-Embedding 0.6B in Ollama (`qwen3-embedding:0.6b`, the one Socia
+#   and Lexia use: 1 GB of the GPU while loaded). It turns a line into 1,024 numbers. Until 20 Nov
+#   Socia ran an ONNX copy herself; the neurons trained on Ollama's numbers did as well, on the
+#   same lines (cross-validated: 328 of 365 right about you, 266 of 284 about her; ONNX 331, 267).
 # - **The neurons** are logistic regression: one weight per number, plus a sigmoid. They train in a
 #   second on the CPU.
 # - **The fact writer** is her chat model with one narrow job: write the fact in one line. It sees
@@ -452,8 +453,8 @@ table(generated[::12], ["who", "label", "before", "text", "fact"])
 import time as _time
 
 started = _time.perf_counter()
-rc.embedder()  # loads it (and downloads it the first time, 1.2 GB)
-print(f"embedding model ready in {_time.perf_counter() - started:.1f} s, on the {rc.embedder()[2]}")
+rc.embed(config, [{"who": "you", "text": "hello"}])  # Ollama loads it
+print(f"embedding model ({config.embed_model}) ready in {_time.perf_counter() - started:.1f} s, in Ollama")
 started = _time.perf_counter()
 x_generated = rc.embed(config, generated)
 x_real = rc.embed(config, real) if real else None

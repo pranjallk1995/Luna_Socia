@@ -100,9 +100,10 @@ class SociaConfig:
     read_chats: bool = False
     # After each text turn, a small classifier decides whether your message or her reply holds a lasting fact, and
     # her chat model writes it into her memory or bio (app/remembering.py). LUNASOCIA_REMEMBER_AUTO=0 leaves it to
-    # her remember tool alone. Its embedding model runs on the "cpu" (no GPU memory) or "cuda" (1.2 GB).
+    # her remember tool alone. Its embedding model is Ollama's, the one Lexia's search uses (1 GB of the GPU while
+    # loaded); it also finds the lines of her memory a message is about.
     remember_auto: bool = True
-    remember_device: str = "cpu"
+    embed_model: str = "qwen3-embedding:0.6b"
     data_dir: Path = Path("/data")
     # Shared with Luna Sentia (LUNASOCIA_API_TOKEN in both .env files), whose model monitor
     # asks GET /api/models about the voice models; blank lets only the owner's session ask.
@@ -142,7 +143,7 @@ class SociaConfig:
             voice_device=setting("LUNASOCIA_VOICE_DEVICE", cls.voice_device).lower(),
             read_chats=setting("LUNASOCIA_READ_CHATS", "") == "1",
             remember_auto=setting("LUNASOCIA_REMEMBER_AUTO", "1") != "0",
-            remember_device=setting("LUNASOCIA_REMEMBER_DEVICE", cls.remember_device).lower(),
+            embed_model=setting("LUNASOCIA_EMBED_MODEL", cls.embed_model),
             data_dir=Path(setting("LUNASOCIA_DATA_DIR", "/data")),
             api_token=os.getenv("LUNASOCIA_API_TOKEN", "").strip(),
         )

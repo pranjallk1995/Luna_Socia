@@ -45,13 +45,11 @@ Socia is one service (`ui`): the page and its API, behind Luna's single sign-on.
 | Voice messages | faster-whisper `LUNASOCIA_STT_MODEL` (default `large-v3-turbo`, int8/float16) | Here, on the GPU (`LUNASOCIA_VOICE_DEVICE`, default `cuda`; `cpu` to keep it off the GPU), loaded at start | A few voice messages by hand |
 | Her voice | Kokoro 82M, in the voice chosen for her (16 female English and Hindi voices; `LUNASOCIA_TTS_VOICE`, default `af_heart`, for new girlfriends) | Here, on the GPU with Whisper (about 1.5 GB for both, and 0.2 GB for CUDA), loaded at start. Socia measures what each model takes as it loads and reports it to Sentia's monitor | Listen to a few replies |
 | Her memory | The chat model reads imported ChatGPT or Claude chats for facts about you, in the background; reading her own chats too is off until it is reliable (`LUNASOCIA_READ_CHATS=1`) | Sentia's Ollama, on the GPU, only while no reply is being written | `model_evaluations/remember.py`, then import a small export and read what she remembers |
-| What she remembers by herself | Qwen3-Embedding 0.6B (ONNX, `onnx-community/Qwen3-Embedding-0.6B-ONNX`) embeds your message and her reply, each with the line before it, and two small neurons decide whether either holds a lasting fact. The chat model then writes it in one line (`LUNASOCIA_REMEMBER_AUTO`, default on). The same model finds the lines of her memory your message is about | Here, on the CPU (`LUNASOCIA_REMEMBER_DEVICE`, default `cpu`: 2.4 GB of RAM, about 0.4 s a turn; `cuda`: 1.2 GB of the GPU), loaded at start. Downloaded once to the data volume | Notebook 03, Part B: the neurons are trained on its embeddings, so train them again |
+| What she remembers by herself | Qwen3-Embedding 0.6B (`LUNASOCIA_EMBED_MODEL`, default `qwen3-embedding:0.6b`, the one Lexia's search uses) embeds your message and her reply, each with the line before it, and two small neurons decide whether either holds a lasting fact. The chat model then writes it in one line (`LUNASOCIA_REMEMBER_AUTO`, default on). The same model finds the lines of her memory your message is about | Sentia's Ollama, on the GPU (1 GB while loaded; it stays a couple of minutes after a turn) | Notebook 03, Part B: the neurons are trained on its embeddings, so train them again |
 
 ## The models in Socia itself
 
-Her voice, both ways, face recognition, and the embedding model that decides what she remembers run
-inside Socia rather than in Sentia's Ollama. The embedding model runs on the CPU by default, so it takes no GPU
-memory beside the vision model during a photo turn.
+Her voice, both ways, and face recognition run inside Socia rather than in Sentia's Ollama.
 Whisper and Kokoro load when Socia starts and stay (about 1.5 GB of the GPU, and 0.2 GB for
 CUDA); the face models load beside the vision model for a photo and leave with it. Socia
 measures what each one takes as it loads and reports it at `GET /api/models`, so Sentia's
@@ -76,14 +74,13 @@ the owner only. Its models run on the home's one GPU, and she can act in every L
 | --- | --- | --- | --- |
 | `huihui_ai/qwen3-vl-abliterated:8b-instruct` (Qwen3-VL 8B, uncensored) | Ollama, at 16k context for every app; in Socia's chat model's place while Luna looks at a photo | Lexia (`DOCUMENT_MODEL`), Visia (`VISION_MODEL`), Vibia (`CAPTION_MODEL`), Fiora (`OLLAMA_MODEL`), Socia's photo replies (`LUNASOCIA_VISION_MODEL`) | `model_checks/check_model.py`, then Lexia's, Visia's and Vibia's `model_evaluations/` and Socia's cat game |
 | `huihui_ai/qwen3-abliterated:8b` (Qwen3 8B, uncensored) | Ollama, resident at `SENTIA_RESIDENT_CONTEXT` | Socia's chat (`LUNASOCIA_CHAT_MODEL`) | `model_checks/check_model.py --context 8192`, then Socia's `model_evaluations/` |
-| `qwen3-embedding:0.6b` | Ollama | Lexia's semantic search (`EMBEDDING_MODEL`) | Re-embed with Lexia's `reindex_semantic_search` |
+| `qwen3-embedding:0.6b` (Qwen3-Embedding 0.6B) | Ollama | Lexia's semantic search (`EMBEDDING_MODEL`); what Socia remembers by herself, and the lines of her memory a message is about (`LUNASOCIA_EMBED_MODEL`) | Re-embed with Lexia's `reindex_semantic_search`; train Socia's neurons again (her notebook 03, Part B) |
 | Qwen-Image 2.1 Turbo | ComfyUI | Socia's pictures of Luna | A few pictures by hand |
 | SigLIP 2 (`google/siglip2-base-patch16-224`) | Visia itself, GPU only | Visia's meaning search | Pinned in Visia's image; `backfill_metadata` re-embeds |
 | CLAP (`laion/clap-htsat-unfused`) | Vibia itself, GPU or CPU | Vibia's listening and search | Pinned in Vibia's image; every track is heard again |
 | Docling (layout, tables, OCR) | Lexia itself, GPU or CPU | Lexia's page reading | Pinned in Lexia's image |
 | Whisper `large-v3-turbo`, Kokoro 82M | Socia itself, GPU (about 1.5 GB, and 0.2 GB for CUDA, loaded at start) or CPU | Socia's voice messages and Luna's voice (`LUNASOCIA_STT_MODEL`, `LUNASOCIA_TTS_VOICE`, `LUNASOCIA_VOICE_DEVICE`) | Listen to a few replies; downloaded on first use |
 | InsightFace `buffalo_l` (SCRFD, ArcFace) | Socia itself, GPU (about 0.4 GB, loaded with the vision model for a photo) or CPU | Whose faces are in a photo, Luna's or the owner's, told to her vision model | Socia's `model_evaluations/self_recognition.py`; non-commercial licence |
-| Qwen3-Embedding 0.6B (ONNX, `onnx-community/Qwen3-Embedding-0.6B-ONNX`) | Socia itself, CPU (2.4 GB of RAM, about 0.4 s a turn) or GPU (1.2 GB), loaded at start | Whether a message holds a lasting fact Luna should remember, about the owner or herself (`LUNASOCIA_REMEMBER_AUTO`, `LUNASOCIA_REMEMBER_DEVICE`) | Socia's notebook 03, Part B: its neurons are trained on this model's embeddings |
 <!-- luna-models:end -->
 
 Every Luna app but Luna Socia is a React UI plus a FastMCP service on Luna Sentia's
@@ -181,7 +178,8 @@ on): on real chats it still took what photos showed for facts about you.
 `model_evaluations/remember.py` checks what she would remember before it is turned on.
 
 **She also remembers by herself.** After each text reply (not a photo turn), Socia reads your
-message and her reply, each with the line before it, through a small embedding model. Two neurons
+message and her reply, each with the line before it, through a small embedding model (Ollama's
+`qwen3-embedding:0.6b`, the one Lexia's search uses). Two neurons
 decide whether your message holds a lasting fact about you, or her reply something new about
 herself. Only then does her chat model write the fact, as one short line from those words. The
 embedding model compares it with what she already has, so a fact she knows isn't saved twice.

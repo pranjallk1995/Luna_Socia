@@ -110,18 +110,16 @@ class Recall:
         self.lock = asyncio.Lock()
 
     def count(self, text: str) -> int:
-        if self.embedder.tokenizer is None:
-            with self.embedder.lock:
-                self.embedder.load()
-        return len(self.embedder.tokenizer.encode(text).ids)
+        return self.embedder.count(text)
 
     async def rows(self, companion_id: int, lines: list[str]) -> dict[str, dict[str, Any]]:
-        """Each line's row, embedding the lines new to her (learnt, or written by the owner) first."""
+        """Each line's row, embedding first the lines new to her (learnt, or written by the owner) and those an
+        earlier embedding model embedded."""
         rows = {row["line"]: row for row in await asyncio.to_thread(self.store.memory_lines, companion_id)}
-        missing = [line for line in lines if line not in rows]
+        missing = [line for line in lines if line not in rows or rows[line]["embedded_by"] != self.embedder.model]
         if missing:
             vectors = await asyncio.to_thread(self.embedder.vectors, missing)
-            await asyncio.to_thread(self.store.add_memory_lines, companion_id,
+            await asyncio.to_thread(self.store.add_memory_lines, companion_id, self.embedder.model,
                                     [(line, vector.astype(np.float32).tobytes()) for line, vector in zip(missing, vectors)])
             rows = {row["line"]: row for row in await asyncio.to_thread(self.store.memory_lines, companion_id)}
         return rows

@@ -149,6 +149,9 @@ CREATE TABLE IF NOT EXISTS memory_lines (
     recalls TIMESTAMPTZ[] NOT NULL DEFAULT ARRAY[now()],
     PRIMARY KEY (companion_id, line)
 );
+-- The embedding model of each line's vector: a line from an earlier model is embedded again, keeping its kind and
+-- recalls ('' is the ONNX copy of Qwen3-Embedding 0.6B that Socia ran herself before Ollama's).
+ALTER TABLE memory_lines ADD COLUMN IF NOT EXISTS embedded_by TEXT NOT NULL DEFAULT '';
 
 -- The owner as every girlfriend knows them: the name she calls them ('' for their sign-in's first
 -- name) and what they wrote about themselves. One row.
@@ -319,14 +322,16 @@ class SociaStore:
 
     def memory_lines(self, companion_id: int) -> list[dict[str, Any]]:
         with self.connect() as db:
-            return db.execute("SELECT line, kind, vector, recalls FROM memory_lines WHERE companion_id = %s",
+            return db.execute("SELECT line, kind, vector, recalls, embedded_by FROM memory_lines WHERE companion_id = %s",
                               (companion_id,)).fetchall()
 
-    def add_memory_lines(self, companion_id: int, lines: list[tuple[str, bytes]]) -> None:
+    def add_memory_lines(self, companion_id: int, model: str, lines: list[tuple[str, bytes]]) -> None:
+        """Each line's vector from ``model``: a new row, or a line embedded again (keeping its kind and recalls)."""
         with self.connect() as db, db.transaction():
             for line, vector in lines:
-                db.execute("INSERT INTO memory_lines (companion_id, line, vector) VALUES (%s, %s, %s) "
-                           "ON CONFLICT DO NOTHING", (companion_id, line, vector))
+                db.execute("INSERT INTO memory_lines (companion_id, line, vector, embedded_by) VALUES (%s, %s, %s, %s) "
+                           "ON CONFLICT (companion_id, line) DO UPDATE SET vector = EXCLUDED.vector, "
+                           "embedded_by = EXCLUDED.embedded_by", (companion_id, line, vector, model))
 
     def sort_memory_line(self, companion_id: int, line: str, kind: str) -> None:
         with self.connect() as db:

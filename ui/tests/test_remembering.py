@@ -5,13 +5,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import httpx
 import numpy as np
 
 from app.chat import Conversation
 from app.images import ComfyUI
 from app.ollama import Ollama
 from app.persona import DEFAULT_PERSONA
-from app.remembering import SHIPPED_NEURONS, Neuron, Rememberer, fact_line, grounded, known_lines, load_neurons
+from app.remembering import SHIPPED_NEURONS, Embedder, Neuron, Rememberer, fact_line, grounded, known_lines, load_neurons
 
 try:
     from test_socia import MemoryStore, config, fake_services, png
@@ -229,3 +230,18 @@ class ConversationRemembersTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EmbedderTests(unittest.TestCase):
+    def test_vectors_come_from_ollamas_embedding_model_at_unit_length(self):
+        asked = []
+
+        def answer(request):
+            asked.append((request.url.path, request.headers.get("X-Luna-App"), __import__("json").loads(request.content)))
+            return httpx.Response(200, json={"embeddings": [[3.0, 4.0], [0.0, 2.0]]})
+
+        with tempfile.TemporaryDirectory() as folder:
+            embedder = Embedder(config(Path(folder)), transport=httpx.MockTransport(answer))
+            vectors = embedder.vectors(["a", "b"])
+        self.assertEqual(asked, [("/api/embed", "socia", {"model": "qwen3-embedding:0.6b", "input": ["a", "b"]})])
+        np.testing.assert_allclose(vectors, [[0.6, 0.8], [0.0, 1.0]])
