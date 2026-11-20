@@ -14,7 +14,7 @@ import httpx
 from PIL import Image
 from starlette.testclient import TestClient
 
-from app.chat import (ASKS_FOR_PICTURE, PICTURE_PROMISE, written_calls, written_reactions, written_remembers, clean_name, Conversation, model_messages, with_secret_nudge, without_written_pictures,
+from app.chat import (ASKS_FOR_PICTURE, asks_for_picture, PICTURE_PROMISE, written_calls, written_reactions, written_remembers, clean_name, Conversation, model_messages, with_secret_nudge, without_written_pictures,
                       written_notes, written_picture)
 from app.memory import ExportError, MemoryReader, fact_lines, facts_about_her, facts_about_them, parse_export, their_words
 from app.config import SociaConfig
@@ -475,6 +475,36 @@ def streamed(seen):
     return [chat for chat in seen["chats"] if chat.get("stream", True)]
 
 
+
+class PictureTimeoutTests(unittest.TestCase):
+    def test_a_picture_given_up_on_is_stopped_in_comfyui_and_the_gpu_freed(self):
+        import app.images
+        from app.config import SociaConfig as Config
+
+        posted = []
+
+        def comfy(request):
+            path = request.url.path
+            if request.method == "POST":
+                posted.append((path, json.loads(request.content or b"{}")))
+            if path == "/prompt":
+                return httpx.Response(200, json={"prompt_id": "p9"})
+            if path == "/queue":
+                return httpx.Response(200, json={"queue_running": [[0, "p9", {}]], "queue_pending": []})
+            return httpx.Response(200, json={})
+
+        with tempfile.TemporaryDirectory() as folder:
+            comfyui = ComfyUI(config(Path(folder)), httpx.MockTransport(comfy))
+            limit, poll = Config.IMAGE_TIMEOUT_SECONDS, app.images.POLL_SECONDS
+            Config.IMAGE_TIMEOUT_SECONDS, app.images.POLL_SECONDS = 0.05, 0.01
+            try:
+                with self.assertRaises((TimeoutError, asyncio.TimeoutError)):
+                    asyncio.run(comfyui.generate("a selfie", []))
+            finally:
+                Config.IMAGE_TIMEOUT_SECONDS, app.images.POLL_SECONDS = limit, poll
+        self.assertEqual([path for path, _ in posted], ["/prompt", "/queue", "/interrupt", "/free"])
+        self.assertEqual(posted[1][1], {"delete": ["p9"]})
+
 class ConversationTests(unittest.TestCase):
     def setUp(self):
         self.folder = tempfile.TemporaryDirectory()
@@ -851,6 +881,19 @@ class ConversationTests(unittest.TestCase):
         self.assertNotIn("pink sea salt", streamed(seen)[0]["messages"][0]["content"])
         _, seen = self.run_turn([[{"content": "Hmm, guess again"}]], text="is it fruit?", chat_id=chat["id"])
         self.assertIn("pink sea salt", streamed(seen)[0]["messages"][0]["content"])
+
+    def test_a_text_turn_gets_the_camera_only_when_a_picture_is_asked_for(self):
+        for words in ["send me a selfie", "can you send a pic of you?", "show me yourself", "pic of us together"]:
+            self.assertTrue(asks_for_picture(words), words)
+        # 20 November: "imma send you two images" got a picture nobody asked for, which then took 10 minutes.
+        for words in ["ok imma send you two images... tell me who looks better ok...", "I'll send you a pic later",
+                      "let me show you a photo", "good morning", "i'm gonna share some pictures of my trip"]:
+            self.assertFalse(asks_for_picture(words), words)
+        call = {"function": {"name": "create_image", "arguments": {"description": "me waving"}}}
+        events, seen = self.run_turn([[{"content": "Okay, send them! Here you go 📷", "tool_calls": [call]}]],
+                                     text="ok imma send you two images... tell me who looks better ok...")
+        self.assertNotIn("create_image", [t["function"]["name"] for t in streamed(seen)[0].get("tools", [])])
+        self.assertNotIn("image_started", [e["type"] for e in events])
 
     def test_a_photo_gets_words_unless_a_picture_is_asked_for(self):
         for words in ["add yourself here", "send me a selfie", "put yourself next to me", "pic of you please",

@@ -9,6 +9,7 @@ output takes the first reference's shape.
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 import uuid
 from typing import Any
@@ -16,6 +17,8 @@ from typing import Any
 import httpx
 
 from app.config import SociaConfig
+
+logger = logging.getLogger(__name__)
 
 # Qwen-Image 2.1 Turbo's sampling schedule, from its model_index.json via ComfyUI's template.
 TURBO_SIGMAS = "1.0, 0.978453, 0.95418, 0.926626, 0.89508, 0.845148, 0.704534, 0.414568, 0"
@@ -84,11 +87,27 @@ class ComfyUI:
             if reply.status_code != 200:
                 raise ImageError(f"ComfyUI refused the workflow: {reply.text[:500]}")
             prompt_id = reply.json()["prompt_id"]
+            done = False
             try:
-                return await asyncio.wait_for(self.result(prompt_id), SociaConfig.IMAGE_TIMEOUT_SECONDS)
+                image = await asyncio.wait_for(self.result(prompt_id), SociaConfig.IMAGE_TIMEOUT_SECONDS)
+                done = True
+                return image
             finally:
-                # Hand the GPU back to Ollama.
+                # A picture given up on (too slow, or the reply cancelled) stops drawing: left running, it held
+                # the GPU and 15 GB of RAM long after she stopped waiting. Then the GPU goes back to Ollama.
+                if not done:
+                    await self.cancel(prompt_id)
                 await self.free()
+
+    async def cancel(self, prompt_id: str) -> None:
+        """Take a picture out of ComfyUI's queue, and stop it if it is the one drawing."""
+        try:
+            await self.client.post("/queue", json={"delete": [prompt_id]})
+            running = (await self.client.get("/queue")).json().get("queue_running") or []
+            if any(len(job) > 1 and job[1] == prompt_id for job in running):
+                await self.client.post("/interrupt", json={"prompt_id": prompt_id})
+        except (httpx.HTTPError, ValueError):
+            logger.warning("Could not stop the picture %s in ComfyUI", prompt_id)
 
     async def free(self) -> None:
         """Ask ComfyUI to let go of the image model: after each picture, and when Socia starts, in case a

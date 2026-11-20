@@ -65,6 +65,24 @@ ASKS_FOR_PICTURE = re.compile(
     r"\b(?:join|step|get|be|jump|come)\b[^.?!]{0,20}\b(?:in|into)\b[^.?!]{0,20}\b(?:this|it|photo|pic|picture|frame|here)\b|"
     r"\b(?:improve|edit|retouch|enhance|fix|change|brighten|redo|recreate)\b[^.?!]{0,30}\b(?:this|it|photo|pic|picture|"
     r"image|lighting|light|background|colou?rs?)\b", re.IGNORECASE)
+# The owner saying they will send or show something ("imma send you two images"): not a request for her picture.
+OWNER_SENDS = re.compile(
+    r"\b(?:i|imma|i'?ll|i will|i'?m (?:gonna|going to|about to)|let me|lemme|gonna)\s+(?:\w+\s+){0,2}?"
+    r"(?:send|share|show|upload|post)\b[^.?!]*", re.IGNORECASE)
+
+
+# In a text turn, looser: a picture word alone ("selfie?") or "send me one" after talk of one.
+ASKS_IN_TEXT = re.compile(r"\b(?:selfies?|pics?|pictures?|photos?|nudes?|snaps?)\b|\bsend (?:me|one|another|it)\b",
+                          re.IGNORECASE)
+
+
+def asks_for_picture(text: str, seeing: bool = False) -> bool:
+    """Whether the owner's message asks her for a picture, leaving out what they say they will send. Beside a
+    photo, only the plain asks: a picture word there is about their photo."""
+    words = OWNER_SENDS.sub(" ", text or "")
+    return bool(ASKS_FOR_PICTURE.search(words) or (not seeing and ASKS_IN_TEXT.search(words)))
+
+
 # How far back the photo a message asks about may be.
 PICTURE_ASKED_WITHIN = 4
 SEEING = """
@@ -608,15 +626,16 @@ class Conversation:
                                owner.get("about") or "")
         tools = TOOLS
         seeing = self.saw = sees_pictures(rows)
-        may_draw = True
+        # She gets the camera only when the owner's message asks for a picture: a picture takes the GPU for
+        # minutes, and "imma send you two images" got one nobody asked for.
+        may_draw = asks_for_picture(rows[-1]["content"] or "", seeing) if rows and rows[-1]["role"] == "user" else False
+        if not may_draw:
+            tools = [tool for tool in TOOLS if tool["function"]["name"] != "create_image"]
         if seeing:
             # A photo, or a question about one: the vision model looks at the pictures and answers as her,
-            # with the last few messages that fit beside them. It gets the camera only when asked for a picture.
+            # with the last few messages that fit beside them.
             rows = rows[-SociaConfig.PHOTO_HISTORY_MESSAGES:]
             prompt += SEEING.format(name=name or "love")
-            may_draw = bool(ASKS_FOR_PICTURE.search(rows[-1]["content"] or ""))
-            if not may_draw:
-                tools = [tool for tool in TOOLS if tool["function"]["name"] != "create_image"]
         elif self.apps:
             try:
                 running = await self.apps.running()
@@ -706,9 +725,10 @@ class Conversation:
         dropped = None
         if not may_draw and call is not None:
             # A picture nobody asked for, in a call she typed out: dropped, her words stay.
-            logger.info("Dropped a picture she was not asked for while looking at a photo")
+            logger.info("Dropped a picture she was not asked for")
             dropped, call = call, None
-        if call is None and rows and not rows[-1].get("image_id") and PICTURE_PROMISE.search(text):
+        if (call is None and may_draw and rows and not rows[-1].get("image_id")
+                and PICTURE_PROMISE.search(text)):
             # She said a picture is coming but did not take it: ask what she meant to send, and take that.
             call = await self.promised_picture(companion["name"], name, rows, text)
         if call:
@@ -721,7 +741,9 @@ class Conversation:
                 yield {"type": "image", "url": f"/api/images/{image_id}"}
             except Exception as error:  # noqa: BLE001 - shown in the chat
                 logger.exception("Image failed")
-                yield {"type": "error", "text": f"The picture did not come out: {error}"}
+                reason = (f"it took longer than {SociaConfig.IMAGE_TIMEOUT_SECONDS / 60:.0f} minutes"
+                          if isinstance(error, (TimeoutError, asyncio.TimeoutError)) else str(error) or type(error).__name__)
+                yield {"type": "error", "text": f"The picture did not come out: {reason}"}
         if not text.strip() and (call or reaction or noted or dropped or remembered):
             # She only sent a picture, a reaction or a note; let her say something with it.
             used, results = [], []
