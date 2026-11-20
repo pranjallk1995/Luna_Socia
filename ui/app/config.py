@@ -100,8 +100,8 @@ class SociaConfig:
     read_chats: bool = False
     # After each text turn, a small classifier decides whether your message or her reply holds a lasting fact, and
     # her chat model writes it into her memory or bio (app/remembering.py). LUNASOCIA_REMEMBER_AUTO=0 leaves it to
-    # her remember tool alone. Its embedding model is Ollama's, the one Lexia's search uses (1 GB of the GPU while
-    # loaded); it also finds the lines of her memory a message is about.
+    # her remember tool alone. Its embedding model is Ollama's, the one Lexia's search uses (1 GB of the GPU, kept
+    # loaded by Sentia); it also finds the lines of her memory a message is about.
     remember_auto: bool = True
     embed_model: str = "qwen3-embedding:0.6b"
     data_dir: Path = Path("/data")
