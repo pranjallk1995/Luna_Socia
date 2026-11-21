@@ -488,10 +488,20 @@ async function openHer(her, chatId) {
   openChat(chats.find((chat) => chat.id === chatId) ?? chats[0] ?? null);
 }
 
+// Her description, one point each: a line, or a sentence of a line ("She is 25. She loves jazz." are two).
+function points(text) {
+  return (text || "").split("\n").flatMap((line) => line.split(/(?<=[.!?…]["”')]?)\s+(?=["“(]?[A-Z])/))
+    .map((point) => point.trim().replace(/^[-•*]\s*/, "")).filter(Boolean);
+}
+
 function drawAbout(her) {
   $("about-name").textContent = her.name;
   $("about-style").textContent = [styleLabel(her), `${LABELS.length[her.persona.length]} replies`, LABELS.language[her.persona.language]].join(" · ");
-  $("about-text").textContent = her.persona.about;
+  $("about-text").replaceChildren(...points(her.persona.about).map((point) => {
+    const item = document.createElement("li");
+    item.textContent = point;
+    return item;
+  }));
   $("about-voice").textContent = voiceLabel(her.voice);
   $("about-memory").textContent = memorySummary(her);
   $("about-chats").textContent = String(her.chats);

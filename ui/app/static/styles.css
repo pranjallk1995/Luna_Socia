@@ -374,10 +374,12 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-about p { margin: 0; }
 .sc-about-text {
   flex: 0 1 auto; min-height: 4.5rem; max-height: 14rem; overflow-y: auto; overscroll-behavior: contain;
-  padding-right: 0.35rem; color: #d4d4d4; font-size: 0.84rem; white-space: pre-wrap; overflow-wrap: anywhere;
+  display: grid; align-content: start; gap: 0.3rem; margin: 0; padding: 0 0.35rem 0 1.1rem;
+  color: #d4d4d4; font-size: 0.84rem; overflow-wrap: anywhere;
   scrollbar-width: thin; scrollbar-color: var(--lv-border) transparent;
 }
 .sc-about-text:empty { display: none; }
+.sc-about-text li::marker { color: var(--lv-muted); }
 .sc-about-facts { display: grid; gap: 0.5rem; margin: 0; padding: 0.8rem; border: 1px solid var(--lv-border); border-radius: 0.8rem; background: var(--lv-surface); }
 .sc-about-facts div { display: flex; justify-content: space-between; gap: 1rem; font-size: var(--luna-text-small); }
 .sc-about-facts dt { color: var(--lv-muted); }
