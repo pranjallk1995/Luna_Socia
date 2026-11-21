@@ -8,7 +8,7 @@ Later notebooks will hold the training and evaluation work. What to improve next
 | Notebook | What it shows |
 |---|---|
 | [01_photo_flow](01_photo_flow.py) | you send her a photo: the faces found in it and whose they are, the pictures the vision model sees, her prompt, her reply, the photo's note, the swap back to her chat model |
-| [02_picture_flow](02_picture_flow.py) | she takes a picture: her references, the image model's instruction, the ComfyUI graph, the latents |
+| [02_picture_flow](02_picture_flow.py) | she takes a picture: her references, the image model's instruction, the request to Sentia's image service, the latents |
 | [03_remember_training](03_remember_training.py) | teaching her chat model to call `remember` by herself: baseline, your labels, made-up examples in her own words, QLoRA training, the adapter into Ollama, before and after |
 
 ## Start, in VS Code

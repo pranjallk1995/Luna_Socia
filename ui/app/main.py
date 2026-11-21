@@ -12,7 +12,7 @@ from app.apps import LunaApps
 from app.chat import Conversation
 from app.config import SociaConfig
 from app.faces import Faces
-from app.images import ComfyUI
+from app.images import ImageService
 from app.memory import MemoryReader
 from app.ollama import Ollama
 from app.persona import DEFAULT_PERSONA
@@ -55,7 +55,7 @@ def main() -> None:
     else:
         raise RuntimeError("Socia's database could not be reached.")
     adopt_legacy_files(config, store)
-    comfy = ComfyUI(config)
+    images = ImageService(config)
     ollama = Ollama(config)
     apps = LunaApps(config, store)
     faces = Faces(config)
@@ -67,12 +67,12 @@ def main() -> None:
         threading.Thread(target=rememberer.preload, name="remember-preload", daemon=True).start()
         # Her memory read by topic, with the same embedding model.
         recall = Recall(store, rememberer.embedder, ollama.complete)
-    conversation = Conversation(config, store, ollama, comfy, apps, faces, rememberer, recall)
+    conversation = Conversation(config, store, ollama, images, apps, faces, rememberer, recall)
     reader = MemoryReader(store, ollama, conversation.turn, config.read_chats)
     voice = Voice(config)
     # Her voice loads and warms up beside the server starting, not on the first voice message.
     threading.Thread(target=voice.preload, name="voice-preload", daemon=True).start()
-    app = create_app(config, store, conversation, comfy, voice, reader=reader, apps=apps)
+    app = create_app(config, store, conversation, images, voice, reader=reader, apps=apps)
     uvicorn.run(app, host="0.0.0.0", port=SociaConfig.PORT, proxy_headers=True, forwarded_allow_ips="*",
                 log_level="info")
 

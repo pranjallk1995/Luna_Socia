@@ -176,7 +176,7 @@ def table(rows: list[dict[str, Any]], columns: list[str], width: int = 70) -> No
 
 
 # The GPU, read the way Sentia's monitor reads it (NVML). Under WSL2 the card's memory counts
-# everything on it (Ollama, ComfyUI, the other apps, Windows); Ollama's own share is in /api/ps.
+# everything on it (Ollama, Sentia's image service, the other apps, Windows); Ollama's own share is in /api/ps.
 
 def gpu() -> dict[str, Any] | None:
     """The card right now: memory used and total (GB), how busy it is (%), temperature and power."""

@@ -230,7 +230,7 @@ print(f"tokens per example: median {lengths[len(lengths) // 2]}, longest {length
 # monitor loads it back only once there's room, and there won't be while training runs. Her voice
 # (about 1.5 GB) can stay. If the cell below shows more than about 2.5 GB used, stop Socia for the
 # training (`docker stop luna_socia-ui-1` in WSL, then `docker start luna_socia-ui-1` after).
-# ComfyUI must not be making a picture.
+# Sentia's image service must not be making a picture.
 #
 # **The base model.** The first run downloads the Hugging Face weights: 16 GB, into `/training`, once.
 

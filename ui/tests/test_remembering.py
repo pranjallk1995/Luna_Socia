@@ -9,7 +9,7 @@ import httpx
 import numpy as np
 
 from app.chat import Conversation
-from app.images import ComfyUI
+from app.images import ImageService
 from app.ollama import Ollama
 from app.persona import DEFAULT_PERSONA
 from app.remembering import SHIPPED_NEURONS, Embedder, Neuron, Rememberer, fact_line, grounded, known_lines, load_neurons
@@ -172,9 +172,9 @@ class ConversationRemembersTests(unittest.TestCase):
 
         rememberer = Rememberer(self.config, self.store, complete, FakeEmbedder())
         rememberer.neurons = neurons()
-        transport, comfy = fake_services([[{"content": reply}]], {})
+        transport, images = fake_services([[{"content": reply}]], {})
         conversation = Conversation(self.config, self.store, Ollama(self.config, transport),
-                                    ComfyUI(self.config, comfy), rememberer=rememberer)
+                                    ImageService(self.config, images), rememberer=rememberer)
 
         async def collect():
             companion = self.store.companion(self.her["id"])
@@ -210,9 +210,9 @@ class ConversationRemembersTests(unittest.TestCase):
 
         recall = Recall()
         seen = {}
-        transport, comfy = fake_services([[{"content": "Morning! ☀️"}]], seen)
+        transport, images = fake_services([[{"content": "Morning! ☀️"}]], seen)
         conversation = Conversation(self.config, self.store, Ollama(self.config, transport),
-                                    ComfyUI(self.config, comfy), recall=recall)
+                                    ImageService(self.config, images), recall=recall)
 
         async def collect():
             companion = self.store.companion(self.her["id"])

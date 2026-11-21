@@ -32,7 +32,7 @@ from app.apps import LunaApps
 from app.avatar import Avatar
 from app.chat import Conversation, normalized_photo, serialize, serialize_chat, serialize_companion
 from app.config import SociaConfig
-from app.images import ComfyUI
+from app.images import ImageService
 from app import model_usage
 from app.memory import ExportError, MemoryReader, parse_export
 from app.persona import CHOICES, DEFAULT_PERSONA, REACTIONS, STYLES, VOICE_IDS, VOICES, clean_persona, example
@@ -110,7 +110,7 @@ def first_name(user: dict[str, Any]) -> str:
     return (str(user.get("name") or "").split() or [""])[0]
 
 
-def create_app(config: SociaConfig, store: SociaStore, conversation: Conversation, comfy: ComfyUI, voice: Voice,
+def create_app(config: SociaConfig, store: SociaStore, conversation: Conversation, images: ImageService, voice: Voice,
                auth_transport: httpx.AsyncBaseTransport | None = None, reader: MemoryReader | None = None,
                apps: LunaApps | None = None) -> Starlette:
     sessions = Sessions(config, auth_transport)
@@ -750,7 +750,7 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         user = await owner(request)
         if isinstance(user, Response):
             return user
-        return JSONResponse({"chat_model": config.chat_model, "images": await comfy.available(),
+        return JSONResponse({"chat_model": config.chat_model, "images": await images.available(),
                              "brand": SociaConfig.BRAND})
 
     async def models(request: Request) -> Response:
@@ -814,11 +814,6 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
             reader.start()
         # Chats started before chats were named get a name, between her replies.
         naming = asyncio.create_task(conversation.name_old_chats())
-        # A picture cut short by a restart leaves ComfyUI holding the image model.
-        try:
-            await comfy.free()
-        except Exception as error:  # noqa: BLE001 - ComfyUI may not be up yet
-            logger.info("Could not ask ComfyUI to free its memory at start: %s", error)
         yield
         naming.cancel()
 

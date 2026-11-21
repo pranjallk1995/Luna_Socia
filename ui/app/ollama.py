@@ -110,9 +110,3 @@ class Ollama:
             "model": self.config.chat_model, "options": {"num_ctx": self.config.context_tokens}})
         reply.raise_for_status()
 
-    async def unload_all(self) -> None:
-        """Free the GPU for an image: every model Ollama holds, whichever app loaded it."""
-        reply = await self.client.get("/api/ps")
-        reply.raise_for_status()
-        for model in reply.json().get("models") or []:
-            await self.client.post("/api/generate", json={"model": model["name"], "keep_alive": 0})

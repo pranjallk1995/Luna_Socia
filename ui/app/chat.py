@@ -19,7 +19,7 @@ from PIL import Image, ImageOps
 from app.apps import APPS, DIRECT_SEPARATOR, LunaApps, app_tools_spec, apps_prompt, is_app_call
 from app.config import SociaConfig
 from app.faces import Faces, faces_line
-from app.images import ComfyUI
+from app.images import ImageService
 from app.ollama import LOOKS_PROMPT, Ollama
 from app.persona import REACTIONS, TOOLS, clean_persona, image_prompt, system_prompt
 from app.store import SociaStore
@@ -373,7 +373,7 @@ def ago(count: int) -> str:
 
 
 class Conversation:
-    def __init__(self, config: SociaConfig, store: SociaStore, ollama: Ollama, comfy: ComfyUI,
+    def __init__(self, config: SociaConfig, store: SociaStore, ollama: Ollama, images: ImageService,
                  apps: LunaApps | None = None, faces: Faces | None = None, rememberer: Any = None,
                  recall: Any = None) -> None:
         self.config = config
@@ -385,7 +385,7 @@ class Conversation:
         self.faces = faces
         self.store = store
         self.ollama = ollama
-        self.comfy = comfy
+        self.images = images
         # The owner's Luna apps, once connected.
         self.apps = apps
         # One reply at a time, as in a real conversation.
@@ -892,8 +892,7 @@ class Conversation:
         prompt, order = image_prompt(description, len(lunas), photo is not None)
         pictures = {"luna": iter(lunas), "photo": iter([self.config.images_dir / photo["file"]] if photo else [])}
         references = [next(pictures[name]).read_bytes() for name in order]
-        # Ollama's models out of the GPU first; ComfyUI frees its own when done.
-        await self.ollama.unload_all()
-        image = await self.comfy.generate(prompt, references)
+        # Sentia's image service empties the GPU of Ollama's models first, and leaves it empty after.
+        image = await self.images.generate(prompt, references)
         file = await asyncio.to_thread(self.save_file, image, ".png")
         return await asyncio.to_thread(self.store.add_image, chat_id, "generated", file, description)

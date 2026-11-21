@@ -41,7 +41,7 @@ Socia is one service (`ui`): the page and its API, behind Luna's single sign-on.
 | Chat | `LUNASOCIA_CHAT_MODEL` (default `huihui_ai/qwen3-abliterated:8b`, an uncensored Qwen3 8B, about 5.2 GB with 8k context), resident on the GPU | Sentia's Ollama, through its monitor, on the GPU | Compare it with [`model_evaluations/`](model_evaluations/README.md) and check it fits with Sentia's `model_checks/check_model.py --context 8192` |
 | Photos sent to Luna | `LUNASOCIA_VISION_MODEL` (default `huihui_ai/qwen3-vl-abliterated:8b-instruct`, an uncensored Qwen3-VL 8B, about 6.1 GB with 16k context, the model every Luna app shares) sees them and answers as her, then describes each photo for her later replies (`LUNASOCIA_VISION_CONTEXT_TOKENS`, default 16384, the context the other apps ask for, so Ollama does not reload it). It takes the chat model's place on the GPU for that reply | Sentia's Ollama, on the GPU | Socia's cat game (`model_evaluations/`), then a few photos by hand |
 | Faces in photos | InsightFace `buffalo_l` (SCRFD finds faces, ArcFace makes a face print of each), compared with her profile picture and other pictures, and with your photos in "Photos of you" (similar enough at `FACE_MATCH` 0.55). Paired with the vision model: it tells it whose faces are in each picture | Here, on the GPU (about 0.4 GB, 50 ms a photo): they load with the vision model for a photo and leave with it. Downloaded once to the data volume | `model_evaluations/self_recognition.py` |
-| Pictures of Luna | Qwen-Image 2.1 Turbo, 8 steps; her profile picture and up to 4 other pictures of her are the face references | Sentia's ComfyUI, on the GPU | A few pictures by hand |
+| Pictures of Luna | Qwen-Image 2.1 Turbo, 8 steps; her profile picture and up to 4 other pictures of her are the face references | Sentia's image service (diffusers), on the GPU | A few pictures by hand |
 | Voice messages | faster-whisper `LUNASOCIA_STT_MODEL` (default `large-v3-turbo`, int8/float16) | Here, on the GPU (`LUNASOCIA_VOICE_DEVICE`, default `cuda`; `cpu` to keep it off the GPU), loaded at start | A few voice messages by hand |
 | Her voice | Kokoro 82M, in the voice chosen for her (16 female English and Hindi voices; `LUNASOCIA_TTS_VOICE`, default `af_heart`, for new girlfriends) | Here, on the GPU with Whisper (about 1.5 GB for both, and 0.2 GB for CUDA), loaded at start. Socia measures what each model takes as it loads and reports it to Sentia's monitor | Listen to a few replies |
 | Her memory | The chat model reads imported ChatGPT or Claude chats for facts about you, in the background; reading her own chats too is off until it is reliable (`LUNASOCIA_READ_CHATS=1`) | Sentia's Ollama, on the GPU, only while no reply is being written | `model_evaluations/remember.py`, then import a small export and read what she remembers |
@@ -75,7 +75,7 @@ the owner only. Its models run on the home's one GPU, and she can act in every L
 | `huihui_ai/qwen3-vl-abliterated:8b-instruct` (Qwen3-VL 8B, uncensored) | Ollama, at 16k context for every app; in Socia's chat model's place while Luna looks at a photo | Lexia (`DOCUMENT_MODEL`), Visia (`VISION_MODEL`), Vibia (`CAPTION_MODEL`), Fiora (`OLLAMA_MODEL`), Socia's photo replies (`LUNASOCIA_VISION_MODEL`) | `model_checks/check_model.py`, then Lexia's, Visia's and Vibia's `model_evaluations/` and Socia's cat game |
 | `huihui_ai/qwen3-abliterated:8b` (Qwen3 8B, uncensored) | Ollama, resident at `SENTIA_RESIDENT_CONTEXT` | Socia's chat (`LUNASOCIA_CHAT_MODEL`) | `model_checks/check_model.py --context 8192`, then Socia's `model_evaluations/` |
 | `qwen3-embedding:0.6b` (Qwen3-Embedding 0.6B) | Ollama, resident beside Socia's chat model (1 GB, at 4k) | Lexia's semantic search (`EMBEDDING_MODEL`); what Socia remembers by herself, and the lines of her memory a message is about (`LUNASOCIA_EMBED_MODEL`) | Re-embed with Lexia's `reindex_semantic_search`; train Socia's neurons again (her notebook 03, Part B) |
-| Qwen-Image 2.1 Turbo | ComfyUI | Socia's pictures of Luna | A few pictures by hand |
+| Qwen-Image 2.1 Turbo (4-bit text encoder, int8 diffusion model) | Sentia's imagegen (diffusers), GPU, one picture at a time | Socia's pictures of Luna | A few pictures by hand |
 | SigLIP 2 (`google/siglip2-base-patch16-224`) | Visia itself, GPU only | Visia's meaning search | Pinned in Visia's image; `backfill_metadata` re-embeds |
 | CLAP (`laion/clap-htsat-unfused`) | Vibia itself, GPU or CPU | Vibia's listening and search | Pinned in Vibia's image; every track is heard again |
 | Docling (layout, tables, OCR) | Lexia itself, GPU or CPU | Lexia's page reading | Pinned in Lexia's image |
@@ -88,7 +88,7 @@ Every Luna app but Luna Socia is a React UI plus a FastMCP service on Luna Senti
 server of its own. Each app's data lives in Sentia's PostgreSQL, people sign in through Sentia's
 `auth`, and model calls go through Sentia's model monitor, which times each one, samples
 the GPU and keeps Socia's chat model resident, to its Ollama. Socia's pictures come from
-Sentia's ComfyUI, which takes turns with Ollama on the GPU. Visia's SigLIP 2, Vibia's CLAP
+Sentia's image service (Qwen-Image 2.1 with diffusers), which takes turns with Ollama on the GPU. Visia's SigLIP 2, Vibia's CLAP
 and Lexia's Docling run inside those apps instead, each in a process that exits when idle.
 Orange lines are Visia image URLs that other apps use: food images for Vita, room images
 for Lumia, and cover art for Vibia. Grey dashed lines are planned: links into Fiora (tax
@@ -103,7 +103,7 @@ play music, dim the lights or find a photo from the chat.
 | --- | --- | --- |
 | Page and API (`luna-socia-ui`, `:18503`) | Starlette, plain HTML, CSS and JavaScript | The chat, her settings, "You", and the Luna apps; for the owner only |
 | Chat and photos | Sentia's Ollama, through its model monitor | Her replies (`LUNASOCIA_CHAT_MODEL`, resident) and what she sees (`LUNASOCIA_VISION_MODEL`) |
-| Pictures | Sentia's ComfyUI, Qwen-Image 2.1 Turbo | Pictures of her, her face from her profile picture |
+| Pictures | Sentia's image service, Qwen-Image 2.1 Turbo with diffusers | Pictures of her, her face from her profile picture |
 | Voice and faces | faster-whisper, Kokoro, InsightFace on ONNX Runtime, in Socia | Voice messages, her voice, whose faces are in a photo |
 | Her phone | MCP client of every Luna app and of Sentia | Using your Luna apps for you |
 | Storage | Sentia's PostgreSQL (`lunasocia`) and the `luna_socia_data` volume | Girlfriends, chats, memory; pictures, photos and models |
@@ -126,9 +126,10 @@ play music, dim the lights or find a photo from the chat.
      read that description in brackets. Right after, Socia swaps the chat model back onto the
      GPU in the background, so your next message does not wait for it.
 3. When a picture fits (you ask for a selfie, or for her to step into your photo from this chat), she calls
-   her `create_image` tool. Socia unloads every Ollama model, sends ComfyUI the Qwen-Image
-   2.1 workflow (`ui/app/images.py`) with her profile picture, her other pictures and, if asked, your last photo
-   as references, then has ComfyUI free its model again.
+   her `create_image` tool. Socia sends Sentia's image service the prompt (`ui/app/images.py`) with her
+   profile picture, her other pictures and, if asked, your last photo as references. The service
+   unloads every Ollama model, reads the prompt in one process and draws in another, each giving
+   the GPU back when it exits; then the monitor loads her chat model back. About 1.5–2 minutes.
 
 4. When you ask for something one of your Luna apps does, she uses it first: see below.
 
@@ -336,7 +337,7 @@ the chat model has left the GPU.
 [`notebooks/`](notebooks/README.md) runs Socia's code one step at a time in VS Code, in a container
 beside the running Socia (`.devcontainer/`, with no Jupyter server or port), and shows every step's result: what the vision model is sent and answers, the
 chat as each model reads it, the tokens, and the GPU while each step runs. `01_photo_flow`
-follows a photo to her reply, with the faces found in it and whose they are; `02_picture_flow` follows a picture from her call to ComfyUI;
+follows a photo to her reply, with the faces found in it and whose they are; `02_picture_flow` follows a picture from her call to Sentia's image service;
 `03_remember_training` teaches her when to remember: your labels, the LoRA fine-tune, and the
 classifier, each against the same baseline. `04_memory_recall` compares what she reads of her
 memory (all of it, or core lines with what a message brings up) and what she forgets, on made-up data. It has its own kernel, **Luna training (torch)**, and

@@ -12,7 +12,7 @@
 #
 # From her `create_image` call to the picture you get, one cell at a time, with her real code,
 # pictures and references. Nothing is written to her database. **Making a picture is off** until
-# you set `MAKE = True`: it takes the GPU from her chat models for about 40 s, so she
+# you set `MAKE = True`: it takes the GPU from her chat models for about 2 minutes, so she
 # answers slowly right after.
 #
 # | Step | Code | What happens |
@@ -20,9 +20,9 @@
 # | 1 | her reply | she calls `create_image(description, include_luna, use_their_photo)`, or Socia's promise check writes the call for her (`PROMISE_PROMPT`) |
 # | 2 | `Conversation.picture` | which pictures go with it: her profile picture and up to 4 more of her when she is in it, and your last photo when she edits it |
 # | 3 | `image_prompt` | the instruction the image model gets, naming the pictures `<image1>`, `<image2>`… |
-# | 4 | `images.workflow` | the ComfyUI graph: Qwen-Image 2.1 Turbo, 8 steps |
-# | 5 | `TextEncodeQwenImage21` (in ComfyUI) | every reference is resized to about 1024×1024, read by the text encoder **and** turned into VAE latents that sit next to the picture being made |
-# | 6 | `ollama.unload_all`, `comfy.generate` | her chat models leave the GPU, ComfyUI makes the picture, then frees it again |
+# | 4 | `ImageService.generate` | the request to Sentia's image service: the prompt, the references, the resolution |
+# | 5 | the service's read pass | every reference is resized to about 1024×1024, read by the text encoder **and** turned into VAE latents that sit next to the picture being made |
+# | 6 | `images.generate` | the service empties Ollama off the GPU, reads, draws, and gives the GPU back |
 
 # %%
 import dataclasses
@@ -30,9 +30,8 @@ import math
 import time
 from pathlib import Path
 
-from app import images as socia_images
 from app.config import SociaConfig
-from app.images import ComfyUI
+from app.images import ImageService
 from app.ollama import Ollama
 from app.persona import image_prompt
 from app.store import SociaStore
@@ -42,8 +41,8 @@ config = SociaConfig.from_env()
 store = SociaStore(config.database_url)
 recorder = Recorder()
 ollama = Ollama(config, transport=recorder)
-comfy = ComfyUI(config)
-print("image model:", config.image_model, "| text encoder:", config.image_text_encoder, "| VAE:", config.image_vae)
+images = ImageService(config)
+print("image service:", config.imagegen_url, "| ready:", await images.available())
 print("references resized to about", config.image_resolution, "px square")
 print("the card:", gpu())
 await models_on_gpu(config)
@@ -93,18 +92,18 @@ thumbs([(path, f"<image{n}> {kind}") for n, (path, kind) in enumerate(zip(refere
 print(prompt)
 
 # %% [markdown]
-# ## Step 4 · The ComfyUI graph
+# ## Step 4 · The request
 #
-# The workflow as Socia sends it (the reference names are made up on upload).
+# What Socia sends Sentia's image service (`POST /pictures`), with each reference's base64 cut short.
 
 # %%
-graph = socia_images.workflow(config, prompt, [f"reference-{n}.png" for n in range(1, len(references) + 1)], seed=1)
-show_json(graph)
+show_json({"prompt": prompt, "resolution": config.image_resolution,
+           "references": [f"<{Path(p).name}: {Path(p).stat().st_size // 1024} KB, base64>" for p in references]})
 
 # %% [markdown]
 # ## Step 5 · How much each reference weighs
 #
-# ComfyUI's `TextEncodeQwenImage21` resizes each reference to about `resolution × resolution`
+# The service's read pass resizes each reference to about `resolution × resolution`
 # pixels and turns it into VAE latents: one token per 16×16 pixels. They sit in the same sequence as
 # the picture being made, which attends to all of them. Five references are five times the
 # picture's own size: each one pulls on the result with its face, **and its clothes and pose**.
@@ -130,7 +129,7 @@ print("The new picture:", first["resized"] if first else f"{resolution}×{resolu
 # %% [markdown]
 # ## Step 6 · Make it (off until `MAKE = True`)
 #
-# Same as Socia: her models leave the GPU, ComfyUI makes the picture, then lets go of the GPU.
+# Same as Socia: the image service empties Ollama off the GPU, reads, draws, then gives the GPU back.
 # `TIMES` makes it more than once, to see how much it changes between seeds. The pictures are saved
 # in `results/` (never in git).
 
@@ -144,8 +143,7 @@ if MAKE:
     data = [Path(p).read_bytes() for p in references]
     for n in range(TIMES):
         async with watch(config, f"Picture {n + 1} of {TIMES}") as making:
-            await ollama.unload_all()
-            image = await comfy.generate(prompt, data)
+            image = await images.generate(prompt, data)
         (out / f"{n + 1}.png").write_bytes(image)
         made.append((image, f"try {n + 1}"))
     (out / "prompt.txt").write_text(prompt)

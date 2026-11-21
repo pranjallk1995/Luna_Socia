@@ -1,4 +1,4 @@
-"""Tests for Luna Socia: the gate, girlfriends and their memory, what she reads, the image workflow, and full turns."""
+"""Tests for Luna Socia: the gate, girlfriends and their memory, what she reads, her pictures, and full turns."""
 
 import asyncio
 import io
@@ -19,7 +19,7 @@ from app.chat import (ASKS_FOR_PICTURE, asks_for_picture, PICTURE_PROMISE, writt
 from app.memory import ExportError, MemoryReader, fact_lines, facts_about_her, facts_about_them, parse_export, their_words
 from app.config import SociaConfig
 from app.store import without_fact
-from app.images import ComfyUI, workflow
+from app.images import ImageError, ImageService
 from app.ollama import Ollama
 from app.persona import DEFAULT_PERSONA, clean_persona, image_prompt, system_prompt
 from app.voice import language, speakable
@@ -31,7 +31,7 @@ NOW = datetime(2026, 11, 10, 20, 30, tzinfo=timezone.utc)
 def config(data_dir: Path = Path("/tmp/socia-test")) -> SociaConfig:
     return SociaConfig(database_url="postgresql://unused", auth_internal_url="http://auth",
                        auth_public_url="https://auth.example.com", public_url="https://socia.example.com",
-                       ollama_url="http://ollama", comfyui_url="http://comfy", data_dir=data_dir)
+                       ollama_url="http://ollama", imagegen_url="http://imagegen", data_dir=data_dir)
 
 
 def png(color: str = "red") -> bytes:
@@ -407,29 +407,51 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(speakable("Rain again? 😂 *giggles* Coffee, then? ❤️"), "Rain again? Coffee, then?")
 
 
-class WorkflowTests(unittest.TestCase):
-    def test_references_feed_the_encoder_in_order_and_the_latent_follows_the_first(self):
-        graph = workflow(config(), "prompt", ["a.png", "b.png"], seed=7)
-        encode = graph["encode"]["inputs"]
-        self.assertEqual(encode["images.image_1"], ["ref1", 0])
-        self.assertEqual(encode["images.image_2"], ["ref2", 0])
-        self.assertEqual(graph["ref2"]["inputs"]["image"], "b.png")
-        self.assertEqual(graph["sample"]["inputs"]["latent_image"], ["encode", 2])
-        self.assertEqual(graph["guider"]["inputs"]["cfg"], 1.0)
-        self.assertEqual(graph["noise"]["inputs"]["noise_seed"], 7)
-        # Every link points at a node in the graph.
-        for node in graph.values():
-            for value in node["inputs"].values():
-                if isinstance(value, list):
-                    self.assertIn(value[0], graph)
+class ImageServiceTests(unittest.TestCase):
+    def test_sends_the_prompt_and_references_then_fetches_the_picture(self):
+        import app.images
 
-    def test_text_to_image_has_no_references(self):
-        graph = workflow(config(), "prompt", [], seed=1)
-        self.assertFalse(any(key.startswith("images.") for key in graph["encode"]["inputs"]))
+        sent = []
+
+        def imagegen(request):
+            sent.append((request.method, request.url.path))
+            if request.url.path == "/pictures":
+                sent.append(json.loads(request.content))
+                return httpx.Response(202, json={"id": "p1", "status": "queued"})
+            if request.url.path == "/pictures/p1":
+                return httpx.Response(200, json={"id": "p1", "status": "done"})
+            return httpx.Response(200, content=png("blue"))
+
+        poll, app.images.POLL_SECONDS = app.images.POLL_SECONDS, 0.0
+        try:
+            image = asyncio.run(ImageService(config(), httpx.MockTransport(imagegen)).generate("a selfie", [b"face"]))
+        finally:
+            app.images.POLL_SECONDS = poll
+        self.assertEqual(image, png("blue"))
+        self.assertEqual(sent[1], {"prompt": "a selfie", "resolution": 1024, "references": ["ZmFjZQ=="]})
+        self.assertEqual(sent[-1], ("GET", "/pictures/p1/image"))
+
+    def test_a_refused_or_failed_picture_says_why(self):
+        import app.images
+
+        refused = httpx.MockTransport(lambda request: httpx.Response(503, json={"error": "still being prepared"}))
+        with self.assertRaisesRegex(ImageError, "still being prepared"):
+            asyncio.run(ImageService(config(), refused).generate("a selfie", []))
+
+        def failing(request):
+            if request.method == "POST":
+                return httpx.Response(202, json={"id": "p2"})
+            return httpx.Response(200, json={"id": "p2", "status": "failed", "error": "the draw pass stopped"})
+        poll, app.images.POLL_SECONDS = app.images.POLL_SECONDS, 0.0
+        try:
+            with self.assertRaisesRegex(ImageError, "draw pass"):
+                asyncio.run(ImageService(config(), httpx.MockTransport(failing)).generate("a selfie", []))
+        finally:
+            app.images.POLL_SECONDS = poll
 
 
 def fake_services(chat_rounds: list[list[dict]], seen: dict):
-    """Ollama answers each chat with the next round of chunks; ComfyUI makes a blue square."""
+    """Ollama answers each chat with the next round of chunks; the image service makes a blue square."""
     rounds = iter(chat_rounds)
 
     def ollama(request: httpx.Request) -> httpx.Response:
@@ -450,25 +472,18 @@ def fake_services(chat_rounds: list[list[dict]], seen: dict):
             return httpx.Response(200, json={})
         return httpx.Response(404)
 
-    def comfy(request: httpx.Request) -> httpx.Response:
+    def imagegen(request: httpx.Request) -> httpx.Response:
         path = request.url.path
-        if path == "/upload/image":
-            seen["uploads"] = seen.get("uploads", 0) + 1
-            return httpx.Response(200, json={"name": f"ref{seen['uploads']}.png"})
-        if path == "/prompt":
-            seen["graph"] = json.loads(request.content)["prompt"]
-            return httpx.Response(200, json={"prompt_id": "p1"})
-        if path == "/history/p1":
-            return httpx.Response(200, json={"p1": {"status": {"completed": True}, "outputs": {
-                "save": {"images": [{"filename": "socia_1.png", "subfolder": "", "type": "output"}]}}}})
-        if path == "/view":
+        if path == "/pictures":
+            seen["picture"] = json.loads(request.content)
+            return httpx.Response(202, json={"id": "p1", "status": "queued"})
+        if path == "/pictures/p1":
+            return httpx.Response(200, json={"id": "p1", "status": "done"})
+        if path == "/pictures/p1/image":
             return httpx.Response(200, content=png("blue"))
-        if path == "/free":
-            seen["freed"] = True
-            return httpx.Response(200)
         return httpx.Response(404)
 
-    return httpx.MockTransport(ollama), httpx.MockTransport(comfy)
+    return httpx.MockTransport(ollama), httpx.MockTransport(imagegen)
 
 
 def streamed(seen):
@@ -477,33 +492,29 @@ def streamed(seen):
 
 
 class PictureTimeoutTests(unittest.TestCase):
-    def test_a_picture_given_up_on_is_stopped_in_comfyui_and_the_gpu_freed(self):
+    def test_a_picture_given_up_on_is_stopped(self):
         import app.images
         from app.config import SociaConfig as Config
 
-        posted = []
+        sent = []
 
-        def comfy(request):
-            path = request.url.path
+        def imagegen(request):
+            sent.append((request.method, request.url.path))
             if request.method == "POST":
-                posted.append((path, json.loads(request.content or b"{}")))
-            if path == "/prompt":
-                return httpx.Response(200, json={"prompt_id": "p9"})
-            if path == "/queue":
-                return httpx.Response(200, json={"queue_running": [[0, "p9", {}]], "queue_pending": []})
-            return httpx.Response(200, json={})
+                return httpx.Response(202, json={"id": "p9", "status": "queued"})
+            return httpx.Response(200, json={"id": "p9", "status": "drawing"})
 
         with tempfile.TemporaryDirectory() as folder:
-            comfyui = ComfyUI(config(Path(folder)), httpx.MockTransport(comfy))
+            images = ImageService(config(Path(folder)), httpx.MockTransport(imagegen))
             limit, poll = Config.IMAGE_TIMEOUT_SECONDS, app.images.POLL_SECONDS
             Config.IMAGE_TIMEOUT_SECONDS, app.images.POLL_SECONDS = 0.05, 0.01
             try:
                 with self.assertRaises((TimeoutError, asyncio.TimeoutError)):
-                    asyncio.run(comfyui.generate("a selfie", []))
+                    asyncio.run(images.generate("a selfie", []))
             finally:
                 Config.IMAGE_TIMEOUT_SECONDS, app.images.POLL_SECONDS = limit, poll
-        self.assertEqual([path for path, _ in posted], ["/prompt", "/queue", "/interrupt", "/free"])
-        self.assertEqual(posted[1][1], {"delete": ["p9"]})
+        self.assertEqual(sent[-1], ("DELETE", "/pictures/p9"))
+
 
 class ConversationTests(unittest.TestCase):
     def setUp(self):
@@ -520,9 +531,9 @@ class ConversationTests(unittest.TestCase):
 
     def run_turn(self, rounds, text="", photo=None, chat_id=None, her=None, completion=None, apps=None, faces=None):
         seen: dict = {"name": completion} if completion else {}
-        ollama_transport, comfy_transport = fake_services(rounds, seen)
+        ollama_transport, images_transport = fake_services(rounds, seen)
         conversation = Conversation(self.config, self.store, Ollama(self.config, ollama_transport),
-                                    ComfyUI(self.config, comfy_transport), apps, faces)
+                                    ImageService(self.config, images_transport), apps, faces)
 
         async def collect():
             companion = self.store.companion((her or self.her)["id"])
@@ -541,7 +552,7 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(len(checks), 1)
         self.assertIn("Luna: Here you go 😘", checks[0]["messages"][0]["content"])
         self.assertIn("image", [event["type"] for event in events])
-        self.assertIn("graph", seen)
+        self.assertIn("picture", seen)
 
     def test_only_her_own_promises_of_a_picture_count(self):
         # Her replies on 16 November that got a picture nobody asked for, and ones that promised one.
@@ -556,7 +567,7 @@ class ConversationTests(unittest.TestCase):
     def test_no_picture_when_she_promises_none_or_nothing_hints_at_one(self):
         events, seen = self.run_turn([[{"content": "Not now, later 😘"}]], text="send me one", completion="NONE")
         self.assertNotIn("image", [event["type"] for event in events])
-        self.assertNotIn("graph", seen)
+        self.assertNotIn("picture", seen)
         events, seen = self.run_turn([[{"content": "Coffee then? ❤️"}]], text="It's raining")
         self.assertFalse(any("Does Luna's last message" in c["messages"][0]["content"] for c in seen.get("completions", [])))
 
@@ -645,11 +656,11 @@ class ConversationTests(unittest.TestCase):
                 return next(self.answers, "Favourite photos")
 
         search = {"function": {"name": "visia__search_images", "arguments": {"query": "favourite"}}}
-        ollama_transport, comfy_transport = fake_services([[{"content": "", "tool_calls": [search]}],
+        ollama_transport, images_transport = fake_services([[{"content": "", "tool_calls": [search]}],
                                                           [{"content": "You have 3 favourites 😍"}]], seen := {})
         apps = Apps()
         conversation = Conversation(self.config, self.store, Model(self.config, ollama_transport),
-                                    ComfyUI(self.config, comfy_transport), apps)
+                                    ImageService(self.config, images_transport), apps)
 
         async def collect():
             return [e async for e in conversation.send(self.store.companion(self.her["id"]), None,
@@ -908,7 +919,7 @@ class ConversationTests(unittest.TestCase):
                                      text="LOOK!!!", photo=png("red"))
         self.assertNotIn("create_image", [t["function"]["name"] for t in streamed(seen)[0].get("tools", [])])
         self.assertNotIn("image_started", [e["type"] for e in events])
-        self.assertNotIn("graph", seen)
+        self.assertNotIn("picture", seen)
         self.assertEqual(events[-2]["message"]["content"] if events[-1]["type"] == "chat" else events[-1]["message"]["content"],
                          "Look at you! 😍")
 
@@ -943,12 +954,10 @@ class ConversationTests(unittest.TestCase):
         # She knows her own looks, read once from her profile picture.
         self.assertIn("A woman who looks like this is not always you", streamed(seen)[0]["messages"][0]["content"])
         self.assertEqual(self.profile.with_suffix(".txt").read_text(), "A red square.")
-        # Their photo is <image1>, her profile <image2>; Ollama was emptied and ComfyUI freed after.
-        encode = seen["graph"]["encode"]["inputs"]
-        self.assertIn("<image2> into <image1>", encode["prompt"])
-        self.assertEqual(seen["graph"]["ref1"]["inputs"]["image"], "ref1.png")
-        self.assertIn({"model": "qwen3:14b", "keep_alive": 0}, seen["unloaded"])
-        self.assertTrue(seen["freed"])
+        # Their photo is <image1>, her profile <image2>, sent to the image service in that order.
+        picture = seen["picture"]
+        self.assertIn("<image2> into <image1>", picture["prompt"])
+        self.assertEqual(len(picture["references"]), 2)
         saved = events[-2]["message"]
         self.assertEqual((saved["content"], saved["image_kind"]), ("Us! 🥰", "generated"))
         self.assertTrue((self.config.images_dir / self.store.image(2)["file"]).exists())
@@ -980,14 +989,14 @@ class ConversationTests(unittest.TestCase):
 
     def test_old_chats_named_after_their_first_message_get_a_name(self):
         seen: dict = {"name": "Name: **Late night talks**\nBecause it is late."}
-        ollama_transport, comfy_transport = fake_services([], seen)
+        ollama_transport, images_transport = fake_services([], seen)
         chat = self.store.create_chat(self.her["id"], "hey you up?")
         self.store.add_message(chat["id"], "user", "hey you up?")
         self.store.add_message(chat["id"], "luna", "always for you 🌙")
         waiting = self.store.create_chat(self.her["id"], "unanswered")
         self.store.add_message(waiting["id"], "user", "unanswered")
         conversation = Conversation(self.config, self.store, Ollama(self.config, ollama_transport),
-                                    ComfyUI(self.config, comfy_transport))
+                                    ImageService(self.config, images_transport))
         asyncio.run(conversation.name_waiting_chats())
         self.assertEqual(self.store.chat(chat["id"])["title"], "Late night talks")
         self.assertIn("Luna: always for you", seen["completions"][0]["messages"][0]["content"])
@@ -1007,8 +1016,8 @@ class ConversationTests(unittest.TestCase):
         (folder / "1-aaaaaaaa.jpg").write_bytes(png("yellow"))
         call = {"function": {"name": "create_image", "arguments": {"description": "a selfie", "include_luna": True}}}
         _, seen = self.run_turn([[{"content": "", "tool_calls": [call]}], [{"content": "here"}]], text="selfie?")
-        self.assertEqual(seen["uploads"], 3)
-        self.assertIn("<image1>, <image2> and <image3> are pictures of the same woman", seen["graph"]["encode"]["inputs"]["prompt"])
+        self.assertEqual(len(seen["picture"]["references"]), 3)
+        self.assertIn("<image1>, <image2> and <image3> are pictures of the same woman", seen["picture"]["prompt"])
         self.assertEqual(self.config.references(self.her["id"]), [folder / "1-aaaaaaaa.jpg", folder / "2-bbbbbbbb.jpg"])
 
     def test_her_photo_comes_from_the_same_chat(self):
@@ -1017,7 +1026,7 @@ class ConversationTests(unittest.TestCase):
             "description": "a selfie", "include_luna": True, "use_their_photo": True}}}
         _, seen = self.run_turn([[{"content": "", "tool_calls": [call]}], [{"content": "here"}]], text="selfie?")
         # The new chat has no photo of theirs, so only her profile is a reference.
-        self.assertEqual(seen["uploads"], 1)
+        self.assertEqual(len(seen["picture"]["references"]), 1)
 
     def test_long_first_messages_make_short_titles(self):
         events, _ = self.run_turn([[{"content": "ok"}]], text="word " * 40)

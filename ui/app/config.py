@@ -40,7 +40,7 @@ class SociaConfig:
     MAX_OWNER_PHOTOS: ClassVar[int] = 5
     PHOTOS_SEEN: ClassVar[int] = 3
     PHOTO_SEEN_SIDE: ClassVar[int] = 1024
-    # The longest one image may take, including loading the model from disk.
+    # The longest one picture may take, waiting for the image service included (about 2 minutes each).
     IMAGE_TIMEOUT_SECONDS: ClassVar[float] = 600.0
     # The longest name a girlfriend can have, and what the owner writes about her.
     NAME_CHARS: ClassVar[int] = 40
@@ -72,7 +72,8 @@ class SociaConfig:
     auth_public_url: str
     public_url: str
     ollama_url: str = "http://luna-sentia-ollama:11434"
-    comfyui_url: str = "http://luna-sentia-comfyui:8188"
+    # Luna Sentia's image service (Qwen-Image 2.1 Turbo with diffusers).
+    imagegen_url: str = "http://luna-sentia-imagegen:8000"
     chat_model: str = "huihui_ai/qwen3-abliterated:8b"
     vision_model: str = "huihui_ai/qwen3-vl-abliterated:8b-instruct"
     # 8k holds the last 20 messages and leaves room on the GPU; it must equal
@@ -85,9 +86,6 @@ class SociaConfig:
     temperature: float = 0.8
     # Qwen-Image 2.1's pixel budget: about resolution x resolution, keeping the aspect ratio.
     image_resolution: int = 1024
-    image_model: str = "qwen_image_2.1_turbo_bf16.safetensors"
-    image_text_encoder: str = "qwen3vl_8b_int8_convrot.safetensors"
-    image_vae: str = "qwen_image_2.1_vae_bf16.safetensors"
     stt_model: str = "large-v3-turbo"
     # The languages voice messages are in: Whisper picks the likeliest of these instead of any of its
     # 99, which on a short or noisy clip can be a language nobody spoke.
@@ -126,16 +124,13 @@ class SociaConfig:
             auth_public_url=required("LUNA_SSO_URL").rstrip("/"),
             public_url=required("UI_PUBLIC_URL").rstrip("/"),
             ollama_url=setting("LUNASOCIA_OLLAMA_URL", cls.ollama_url).rstrip("/"),
-            comfyui_url=setting("LUNASOCIA_COMFYUI_URL", cls.comfyui_url).rstrip("/"),
+            imagegen_url=setting("LUNASOCIA_IMAGEGEN_URL", cls.imagegen_url).rstrip("/"),
             chat_model=setting("LUNASOCIA_CHAT_MODEL", cls.chat_model),
             vision_model=setting("LUNASOCIA_VISION_MODEL", cls.vision_model),
             context_tokens=int(setting("LUNASOCIA_CONTEXT_TOKENS", str(cls.context_tokens))),
             vision_context_tokens=int(setting("LUNASOCIA_VISION_CONTEXT_TOKENS", str(cls.vision_context_tokens))),
             temperature=float(setting("LUNASOCIA_TEMPERATURE", str(cls.temperature))),
             image_resolution=int(setting("LUNASOCIA_IMAGE_RESOLUTION", str(cls.image_resolution))),
-            image_model=setting("LUNASOCIA_IMAGE_MODEL", cls.image_model),
-            image_text_encoder=setting("LUNASOCIA_IMAGE_TEXT_ENCODER", cls.image_text_encoder),
-            image_vae=setting("LUNASOCIA_IMAGE_VAE", cls.image_vae),
             stt_model=setting("LUNASOCIA_STT_MODEL", cls.stt_model),
             stt_languages=tuple(code.strip().lower() for code in setting("LUNASOCIA_STT_LANGUAGES", "en,hi").split(",")
                                 if code.strip()),

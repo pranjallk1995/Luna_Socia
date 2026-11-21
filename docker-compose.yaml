@@ -1,7 +1,7 @@
 services:
   # Luna Socia: the owner's chat with Luna by text, voice and pictures. Her chat and
   # vision models come from Luna Sentia's Ollama (through its monitor), her pictures from
-  # Sentia's ComfyUI; her voice (Whisper and Kokoro, about 1.1 GB) runs here on the GPU.
+  # Sentia's image service (imagegen); her voice (Whisper and Kokoro, about 1.1 GB) runs here on the GPU.
   # The conversation is in the lunasocia database, the pictures, her profile picture and
   # the voice models on the data volume.
   ui:
