@@ -227,6 +227,11 @@ read aloud, and any picture downloaded. The pencil beside your message changes i
 "edited"; she reads the new words from her next reply on. The × beside a fact under
 "Remembered:" takes it out of her memory or bio.
 
+When your computer has more than one speaker, choose the one her voice plays on under
+"Speaker" in the chat's settings (Chrome and Edge; other browsers use the default). The browser
+names its speakers once Socia may use the microphone, so "Find speakers" asks for it first. The
+choice is kept in that browser; if that speaker is not connected, she plays on the default.
+
 ## Her phone: your Luna apps
 
 Luna can use your other Luna apps for you: play a song on the speakers (Vibia), dim the

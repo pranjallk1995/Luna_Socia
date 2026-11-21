@@ -218,7 +218,7 @@ function playSample(voice, button) {
   const done = () => { button.classList.remove("sc-playing"); if (sample?.audio === audio) sample = null; };
   audio.addEventListener("ended", done);
   audio.addEventListener("error", done);
-  audio.play().catch(done);
+  onSpeaker(audio).then(() => audio.play()).catch(done);
 }
 
 function drawPreview() {
@@ -1248,8 +1248,82 @@ function wireEmoji() {
 let playing = null;
 async function speak(id) {
   playing?.pause();
-  playing = new Audio(`/api/speech/${id}`);
-  playing.play().catch(() => {});
+  const audio = new Audio(`/api/speech/${id}`);
+  playing = audio;
+  await onSpeaker(audio);
+  if (playing === audio) audio.play().catch(() => {});
+}
+
+// Speaker: where her voice plays, chosen in this browser when it finds more than one. Chrome and Edge can play on
+// a chosen speaker (setSinkId); other browsers play on the default. Browsers name their speakers only once the page
+// may use the microphone, so until then "Find speakers" asks for it.
+const CAN_PICK_SPEAKER = "setSinkId" in HTMLMediaElement.prototype && !!navigator.mediaDevices?.enumerateDevices;
+const NOT_A_SPEAKER = new Set(["", "default", "communications"]);
+
+async function onSpeaker(audio) {
+  const id = stored("socia.speaker", "");
+  if (!CAN_PICK_SPEAKER || !id) return;
+  try { await audio.setSinkId(id); } catch { /* not connected now: the default speaker plays it */ }
+}
+
+async function findSpeakers() {
+  const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+  const outputs = devices.filter((device) => device.kind === "audiooutput");
+  return {
+    named: outputs.some((device) => device.label),
+    speakers: outputs.filter((device) => !NOT_A_SPEAKER.has(device.deviceId)),
+  };
+}
+
+async function drawSpeakers() {
+  const box = $("speaker-box");
+  if (!CAN_PICK_SPEAKER) { box.hidden = true; return; }
+  const { named, speakers } = await findSpeakers();
+  const select = $("speaker");
+  const note = $("speaker-note");
+  if (!named) {
+    box.hidden = false;
+    select.parentElement.hidden = true;
+    $("speaker-find").hidden = false;
+    note.textContent = "Your browser names its speakers once Socia may use the microphone.";
+    return;
+  }
+  $("speaker-find").hidden = true;
+  if (speakers.length < 2) { box.hidden = true; return; }
+  const chosen = stored("socia.speaker", "");
+  select.replaceChildren(
+    element("option", { value: "", textContent: "The default speaker" }),
+    ...speakers.map((speaker) => element("option", { value: speaker.deviceId, textContent: speaker.label })),
+  );
+  const connected = speakers.some((speaker) => speaker.deviceId === chosen);
+  select.value = connected ? chosen : "";
+  select.parentElement.hidden = false;
+  box.hidden = false;
+  note.textContent = chosen && !connected
+    ? "The speaker you chose is not connected, so her voice plays on the default."
+    : "Her replies and voice samples play here, in this browser.";
+}
+
+function wireSpeakers() {
+  if (!CAN_PICK_SPEAKER) return;
+  $("speaker").addEventListener("change", () => {
+    const id = $("speaker").value;
+    store("socia.speaker", id);
+    // What is playing moves over at once.
+    for (const audio of [playing, sample?.audio]) if (audio) audio.setSinkId(id).catch(() => {});
+    drawSpeakers();
+  });
+  $("speaker-find").addEventListener("click", async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+    } catch {
+      $("speaker-note").textContent = "Without the microphone, your browser keeps its speakers' names hidden.";
+      return;
+    }
+    drawSpeakers();
+  });
+  navigator.mediaDevices.addEventListener?.("devicechange", () => { if ($("menu").open) drawSpeakers(); });
 }
 
 async function toggleRecording() {
@@ -1661,7 +1735,8 @@ function wire() {
   });
 
   const menu = $("menu");
-  const openMenu = () => { loadStatus(); loadReferences(); showApps(); menu.showModal(); };
+  const openMenu = () => { loadStatus(); loadReferences(); showApps(); drawSpeakers(); menu.showModal(); };
+  wireSpeakers();
   $("owner-photos-file").addEventListener("change", async () => {
     const files = [...$("owner-photos-file").files];
     if (!files.length) return;
