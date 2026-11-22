@@ -1595,8 +1595,8 @@ async function loadReferences(note) {
   }));
   $("references-add").hidden = references.length >= max;
   $("references-note").textContent = note || (references.length
-    ? `${references.length} of ${max}. Use pictures where her face is clear; each one makes a picture a little slower.`
-    : "More pictures of her keep her face the same from other sides. Each one makes a picture a little slower.");
+    ? `${references.length} of ${max}. Use pictures where her face is clear, in different poses: each picture of her takes the ones used least lately, and those in pictures you ❤️ a little sooner.`
+    : "More pictures of her keep her face the same from other sides and vary her poses: each picture of her takes the ones used least lately.");
 }
 
 // Photos of the owner's face, for face recognition in the photos they send her.

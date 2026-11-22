@@ -51,6 +51,7 @@ class MemoryStore:
         self.messages: list[dict] = []
         self.apps: dict | None = None
         self.owner = {"name": "", "about": ""}
+        self.picture_references: list[dict] = []
 
     def owner_profile(self):
         return dict(self.owner)
@@ -253,6 +254,21 @@ class MemoryStore:
     def image(self, image_id):
         return next((i for i in self.images if i["id"] == image_id), None)
 
+    def add_picture_references(self, companion_id, image_id, references):
+        for reference in references:
+            self.picture_references.append({"companion_id": companion_id, "reference": reference,
+                                            "image_id": image_id, "used_at": datetime.now(timezone.utc)})
+
+    def reference_history(self, companion_id, liked):
+        history = {}
+        for row in self.picture_references:
+            if row["companion_id"] != companion_id:
+                continue
+            past = history.setdefault(row["reference"], {"uses": [], "likes": 0})
+            past["uses"].append(row["used_at"])
+            past["likes"] += any(m["image_id"] == row["image_id"] and m["reaction"] in liked for m in self.messages)
+        return history
+
     def add_message(self, chat_id, role, content, image_id=None, photo_note=None, apps=None, remembered=None):
         image = self.image(image_id) if image_id else None
         row = {"id": len(self.messages) + 1, "chat_id": chat_id, "role": role, "content": content,
@@ -405,6 +421,24 @@ class PromptTests(unittest.TestCase):
 
     def test_the_voice_skips_emoji_and_actions(self):
         self.assertEqual(speakable("Rain again? 😂 *giggles* Coffee, then? ❤️"), "Rain again? Coffee, then?")
+
+
+class PoseTests(unittest.TestCase):
+    def test_used_lately_scores_low_and_likes_raise_it_a_little(self):
+        from datetime import timedelta
+        import random
+        from app import poses
+        now = datetime(2026, 11, 22, tzinfo=timezone.utc)
+        fresh, hour_ago, week_ago = Path("fresh.jpg"), Path("hour.jpg"), Path("week.jpg")
+        history = {"hour.jpg": {"uses": [now - timedelta(hours=1)], "likes": 0},
+                   "week.jpg": {"uses": [now - timedelta(days=7)], "likes": 0}}
+        pictures = [hour_ago, week_ago, fresh]
+        self.assertEqual(poses.chosen(pictures, history, now, 3, random.Random(1)), [fresh, week_ago, hour_ago])
+        # Liked, the same use still scores lower than one never used, but higher than without the like.
+        self.assertGreater(poses.score([now - timedelta(days=1)], 2, now), poses.score([now - timedelta(days=1)], 0, now))
+        self.assertLess(poses.score([now - timedelta(days=1)], 5, now), poses.score([], 0, now))
+        # Used more often scores lower than used once at the same time.
+        self.assertLess(poses.score([now - timedelta(days=2)] * 3, 0, now), poses.score([now - timedelta(days=2)], 0, now))
 
 
 class ImageServiceTests(unittest.TestCase):
@@ -1019,6 +1053,21 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(len(seen["picture"]["references"]), 3)
         self.assertIn("<image1>, <image2> and <image3> are pictures of the same woman", seen["picture"]["prompt"])
         self.assertEqual(self.config.references(self.her["id"]), [folder / "1-aaaaaaaa.jpg", folder / "2-bbbbbbbb.jpg"])
+
+    def test_her_pictures_least_used_lately_go_next(self):
+        folder = self.config.references_dir(self.her["id"])
+        folder.mkdir(parents=True)
+        for number in range(1, 7):
+            (folder / f"{number}-{number:08x}.jpg").write_bytes(png("green"))
+        call = {"function": {"name": "create_image", "arguments": {"description": "a selfie", "include_luna": True}}}
+        self.run_turn([[{"content": "", "tool_calls": [call]}], [{"content": "here"}]], text="selfie?")
+        first = {row["reference"] for row in self.store.picture_references}
+        self.assertEqual(len(first), SociaConfig.PICTURE_REFERENCES)
+        _, seen = self.run_turn([[{"content": "", "tool_calls": [call]}], [{"content": "here"}]], text="another selfie?")
+        self.assertEqual(len(seen["picture"]["references"]), 1 + SociaConfig.PICTURE_REFERENCES)
+        second = [row["reference"] for row in self.store.picture_references[SociaConfig.PICTURE_REFERENCES:]]
+        # The two never used go first, then two of the first picture's.
+        self.assertEqual(set(second) - first, {path.name for path in self.config.references(self.her["id"])} - first)
 
     def test_her_photo_comes_from_the_same_chat(self):
         self.run_turn([[{"content": "nice"}]], text="look", photo=png("red"))

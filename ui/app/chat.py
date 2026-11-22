@@ -10,12 +10,14 @@ import logging
 import re
 import uuid
 from collections.abc import AsyncIterator
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageOps
 
+from app import poses
 from app.apps import APPS, DIRECT_SEPARATOR, LunaApps, app_tools_spec, apps_prompt, is_app_call
 from app.config import SociaConfig
 from app.faces import Faces, faces_line
@@ -886,8 +888,15 @@ class Conversation:
     async def picture(self, companion_id: int, chat_id: int, arguments: dict[str, Any]) -> int:
         description = str(arguments.get("description") or "").strip() or "a cosy selfie"
         profile = self.config.profile_path(companion_id)
-        # Her profile picture first, then her other pictures; none without a profile picture.
-        lunas = [profile, *self.config.references(companion_id)] if arguments.get("include_luna") and profile.exists() else []
+        # Her profile picture first, then those of her other pictures used least lately; none without a profile picture.
+        others: list[Path] = []
+        with_her = bool(arguments.get("include_luna")) and profile.exists()
+        if with_her:
+            history = await asyncio.to_thread(self.store.reference_history, companion_id,
+                                              list(SociaConfig.LIKED_REACTIONS))
+            others = poses.chosen(self.config.references(companion_id), history, datetime.now(timezone.utc),
+                                  SociaConfig.PICTURE_REFERENCES)
+        lunas = [profile, *others] if with_her else []
         photo = await asyncio.to_thread(self.store.last_photo, chat_id) if arguments.get("use_their_photo") else None
         prompt, order = image_prompt(description, len(lunas), photo is not None)
         pictures = {"luna": iter(lunas), "photo": iter([self.config.images_dir / photo["file"]] if photo else [])}
@@ -895,4 +904,8 @@ class Conversation:
         # Sentia's image service empties the GPU of Ollama's models first, and leaves it empty after.
         image = await self.images.generate(prompt, references)
         file = await asyncio.to_thread(self.save_file, image, ".png")
-        return await asyncio.to_thread(self.store.add_image, chat_id, "generated", file, description)
+        image_id = await asyncio.to_thread(self.store.add_image, chat_id, "generated", file, description)
+        if others:
+            await asyncio.to_thread(self.store.add_picture_references, companion_id, image_id,
+                                    [path.name for path in others])
+        return image_id

@@ -153,6 +153,16 @@ CREATE TABLE IF NOT EXISTS memory_lines (
 -- recalls ('' is the ONNX copy of Qwen3-Embedding 0.6B that Socia ran herself before Ollama's).
 ALTER TABLE memory_lines ADD COLUMN IF NOT EXISTS embedded_by TEXT NOT NULL DEFAULT '';
 
+-- Which of her other pictures (references/<name>) each picture of her was made with, and when: the fewer and the
+-- longer ago, the sooner one is used again, and one in a picture the owner liked a little sooner (app/poses.py).
+CREATE TABLE IF NOT EXISTS picture_references (
+    companion_id BIGINT NOT NULL REFERENCES companions(id) ON DELETE CASCADE,
+    reference TEXT NOT NULL,
+    image_id BIGINT REFERENCES images(id) ON DELETE SET NULL,
+    used_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS picture_references_companion ON picture_references (companion_id, reference);
+
 -- The owner as every girlfriend knows them: the name she calls them ('' for their sign-in's first
 -- name) and what they wrote about themselves. One row.
 CREATE TABLE IF NOT EXISTS owner_profile (
@@ -490,6 +500,24 @@ class SociaStore:
             row = db.execute("INSERT INTO images (chat_id, kind, file, prompt) VALUES (%s, %s, %s, %s) RETURNING id",
                              (chat_id, kind, file, prompt)).fetchone()
         return row["id"]
+
+    def add_picture_references(self, companion_id: int, image_id: int, references: list[str]) -> None:
+        """Note which of her other pictures a picture of her was made with."""
+        with self.connect() as db:
+            for reference in references:
+                db.execute("INSERT INTO picture_references (companion_id, reference, image_id) VALUES (%s, %s, %s)",
+                           (companion_id, reference, image_id))
+
+    def reference_history(self, companion_id: int, liked: list[str]) -> dict[str, dict[str, Any]]:
+        """Each of her other pictures: when it was used, and in how many pictures with one of ``liked`` on them."""
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT r.reference, array_agg(r.used_at) AS uses,
+                          count(*) FILTER (WHERE EXISTS (SELECT 1 FROM messages m WHERE m.image_id = r.image_id
+                                                         AND m.reaction = ANY(%s))) AS likes
+                   FROM picture_references r WHERE r.companion_id = %s GROUP BY r.reference""",
+                (liked, companion_id)).fetchall()
+        return {row["reference"]: {"uses": list(row["uses"]), "likes": row["likes"]} for row in rows}
 
     def image(self, image_id: int) -> dict[str, Any] | None:
         with self.connect() as db:

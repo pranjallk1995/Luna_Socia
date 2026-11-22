@@ -26,9 +26,15 @@ class SociaConfig:
     CHAT_TITLE_CHARS: ClassVar[int] = 60
     # Largest photo or voice clip accepted from the page.
     MAX_UPLOAD_BYTES: ClassVar[int] = 25 * 1024 * 1024
-    # More pictures of Luna besides her profile picture, sent with it as references for her face.
-    # Each one makes a picture slower and needs more GPU memory.
-    MAX_REFERENCES: ClassVar[int] = 4
+    # More pictures of Luna besides her profile picture: they keep her face the same at other angles. Each
+    # picture of her takes her profile picture and the PICTURE_REFERENCES of these used least lately (app/poses.py),
+    # so her poses vary; each one sent makes a picture slower and needs more GPU memory.
+    MAX_REFERENCES: ClassVar[int] = 10
+    PICTURE_REFERENCES: ClassVar[int] = 4
+    # The owner's reactions on a picture of her that count as liking it, and how much each like raises the
+    # score of the pictures it used (times ln(1 + likes)); being used lowers a score by about 1.5 just after.
+    LIKED_REACTIONS: ClassVar[tuple[str, ...]] = ("❤️", "😘", "🔥", "👍")
+    LIKE_WEIGHT: ClassVar[float] = 0.5
     # When the vision model answers about photos: the messages it reads, the photos and pictures it
     # sees (newest first), and their longer side; it reads about one token per 32 x 32 pixels.
     PHOTO_HISTORY_MESSAGES: ClassVar[int] = 16
