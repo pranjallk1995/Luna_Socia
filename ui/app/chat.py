@@ -167,8 +167,9 @@ them closely and answer from what you see: who is in them, faces, clothes, anyth
 they differ. Under each picture, "Faces:" says whose faces are in it, from face recognition: it is right, so go by it,
 not by how a face looks to you. You are in a picture only when its "Faces:" says "you"; a woman it does not call you
 is not you, however much she looks like you, and with no face visible you cannot tell who it is. If you said earlier
-that one of these was you and its "Faces:" disagrees, you were wrong: say so. Earlier photos you know only from the
-descriptions in brackets."""
+that one of these was you and its "Faces:" disagrees, you were wrong: say so. Answer about the pictures listed first, the ones
+just sent or asked about; one marked "earlier, only for context" is an older photo: never take it for the new one,
+and bring it up only if asked. Earlier photos you know only from the descriptions in brackets."""
 # Rounds of app use one reply may take: listing an app's tools, reading one, using it, and a retry.
 MAX_APP_ROUNDS = 5
 SECRET_NUDGE = ("[If you are the one to pick a secret here (the thing to guess, an answer), pick it now and call "
@@ -438,6 +439,39 @@ def sees_pictures(rows: list[dict[str, Any]]) -> bool:
     return any(row.get("image_file") for row in recent) and bool(ABOUT_PICTURE.search(rows[-1]["content"] or ""))
 
 
+def recency(back: int) -> float:
+    """How much a picture sent ``back`` messages ago still counts: ACT-R's decay for one look, (1 + age) ** -0.5.
+    1 just now, 0.71 one message ago, 0.5 three ago, 0.33 eight ago."""
+    return (1 + back) ** -0.5
+
+
+def shown_pictures(rows: list[dict[str, Any]]) -> list[tuple[int, dict[str, Any], bool]]:
+    """The pictures she sees, newest first, as (messages ago, row, whether it is one she is answering).
+
+    She answers the newest set: the photos sent together just now, or, for a question about them, the last ones
+    sent together. An earlier picture comes along, marked as only for context, while it still counts
+    (``recency`` at least PICTURE_RECENCY): shown again many messages later, she took an old photo for the new one."""
+    # The owner's last messages together (several photos sent at once) were all sent just now.
+    together = next((i for i in range(len(rows) - 1, -1, -1) if rows[i]["role"] != "user"), -1) + 1
+    found = [(0 if index >= together else len(rows) - 1 - index, index, row)
+             for index, row in enumerate(rows) if row.get("image_file")]
+    if not found:
+        return []
+    # The newest set: the newest picture and the ones sent right before it, by the same sender.
+    newest = [found[-1]]
+    for item in reversed(found[:-1]):
+        if item[1] == newest[-1][1] - 1 and item[2]["role"] == newest[-1][2]["role"]:
+            newest.append(item)
+        else:
+            break
+    current = {id(row) for _, _, row in newest}
+    # The set in the order it was sent ("the first one" is the first), then earlier pictures, newest first.
+    shown = [(back, row, True) for back, _, row in reversed(newest)]
+    shown += [(back, row, False) for back, _, row in reversed(found) if id(row) not in current
+              and recency(back) >= SociaConfig.PICTURE_RECENCY]
+    return shown[:SociaConfig.PHOTOS_SEEN]
+
+
 def seen_size(data: bytes, side: int) -> bytes:
     """A picture at most ``side`` on its longer side, as JPEG: what the vision model reads."""
     image = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
@@ -676,11 +710,7 @@ class Conversation:
         Her profile picture is not attached: shown as picture 1, she took it for one of the owner's photos
         and said "the first one is me" of every set he sent. Face recognition tells her whose faces she sees."""
         pictures, labels = [], []
-        # The owner's last messages together (several photos sent at once) were all sent just now.
-        together = next((i for i in range(len(rows) - 1, -1, -1) if rows[i]["role"] != "user"), -1) + 1
-        shown = [(0 if index >= together else len(rows) - 1 - index, row)
-                 for index, row in enumerate(rows) if row.get("image_file")]
-        for back, row in shown[-SociaConfig.PHOTOS_SEEN:]:
+        for back, row, current in shown_pictures(rows):
             path = self.config.images_dir / row["image_file"]
             if not path.exists():
                 continue
@@ -692,7 +722,8 @@ class Conversation:
                 said = " ".join((row["content"] or "").split())[:80]
                 label = f"the photo {name} sent {ago(back)}" + (f' with "{said}"' if said else "")
             people = self.faces_in(data, companion, name)
-            labels.append(f"{label}. {people}" if people else label)
+            label = f"{label}. {people}" if people else label
+            labels.append(label if current else f"earlier, only for context: {label}")
         if not pictures:
             return messages
         listed = "; ".join(f"{number}) {label}" for number, label in enumerate(labels, start=1))

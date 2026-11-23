@@ -490,6 +490,7 @@ async function openHer(her, chatId) {
   openChat(chats.find((chat) => chat.id === chatId) ?? chats[0] ?? null);
 }
 
+
 function drawAbout(her) {
   $("about-name").textContent = her.name;
   $("about-style").textContent = [styleLabel(her), `${LABELS.length[her.persona.length]} replies`, LABELS.language[her.persona.language]].join(" · ");
@@ -963,9 +964,23 @@ function showChat(chat) {
     item.setAttribute("aria-current", String(Number(item.dataset.chat) === chat?.id)));
 }
 
+// What you are typing stays, for each girlfriend and chat, through a refresh, another tab or another chat.
+function draftKey(chat = state.chat) {
+  return `socia.draft.${state.her?.id}.${chat?.id ?? "new"}`;
+}
+function saveDraft(key = draftKey()) {
+  if (!state.her) return;
+  try {
+    if (text.value) localStorage.setItem(key, text.value);
+    else localStorage.removeItem(key);
+  } catch { /* private window */ }
+}
+
 function openChat(chat) {
   if (state.sending) { setPresence("wait for her reply first"); return; }
   showChat(chat);
+  text.value = stored(draftKey(chat), "");
+  resize();
   list.replaceChildren();
   state.lastDay = null;
   state.oldest = null;
@@ -1085,6 +1100,7 @@ function handle(event, reply) {
       break;
     case "user":
       // The server has your message: it takes the place of the one still uploading.
+      reply.arrived = true;
       reply.pending?.remove();
       append(event.message);
       list.append(reply.element);
@@ -1150,8 +1166,10 @@ async function send(words) {
   form.append("timezone", Intl.DateTimeFormat().resolvedOptions().timeZone || "");
   const photos = [...state.photos];
   photos.forEach((photo) => form.append("photo", photo));
+  const draft = draftKey();
   text.value = "";
   resize();
+  saveDraft(draft);
   clearPhoto();
   closeEmoji();
   const reply = replyElement();
@@ -1171,6 +1189,11 @@ async function send(words) {
       // It never arrived: the photo goes back into the composer to send again.
       reply.pending.remove();
       restorePhoto(photos, message);
+    } else if (!reply.arrived && message && !text.value) {
+      // Your words never reached her: they go back into the box, to send again.
+      text.value = message;
+      resize();
+      saveDraft();
     }
     if (!reply.element.isConnected) list.append(reply.element);
     handle({ type: "error", text: error.message }, reply);
@@ -1284,7 +1307,7 @@ function size(bytes) {
 function restorePhoto(files, words) {
   state.photos = files;
   drawPhotos();
-  if (words && !text.value) { text.value = words; resize(); }
+  if (words && !text.value) { text.value = words; resize(); saveDraft(); }
 }
 
 // Emoji, on a desktop: a phone's keyboard has its own.
@@ -1308,6 +1331,7 @@ function wireEmoji() {
       const end = text.selectionEnd ?? start;
       text.setRangeText(emoji, start, end, "end");
       resize();
+      saveDraft();
       text.focus();
     });
     return button;
@@ -1798,7 +1822,7 @@ async function loadStatus() {
 
 function wire() {
   $("composer").addEventListener("submit", (event) => { event.preventDefault(); send(); });
-  text.addEventListener("input", resize);
+  text.addEventListener("input", () => { resize(); saveDraft(); });
   text.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); send(); }
   });

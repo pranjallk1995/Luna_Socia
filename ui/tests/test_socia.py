@@ -983,6 +983,27 @@ class ConversationTests(unittest.TestCase):
         old = [photo, *[her, ask("hmm")] * 3, ask("what's in the photo?")]
         self.assertFalse(sees_pictures(old))
 
+    def test_she_answers_the_newest_photos_and_an_old_one_is_only_context_or_gone(self):
+        from app.chat import recency, shown_pictures
+
+        photo = lambda name, text="": {"role": "user", "content": text, "image_file": name}  # noqa: E731
+        her = {"role": "luna", "content": "wow", "image_file": None}
+        say = lambda text: {"role": "user", "content": text, "image_file": None}  # noqa: E731
+        latte = [photo("latte.jpg", "my latte art"), her, say("lol"), her, say("ok"), her]
+        # The latte was 6 messages before the coffee photo: it counts too little to be shown again.
+        self.assertLess(recency(6), SociaConfig.PICTURE_RECENCY)
+        rows = [*latte, photo("coffee.jpg", "and this is irish coffee")]
+        self.assertEqual([(row["image_file"], current) for _, row, current in shown_pictures(rows)],
+                         [("coffee.jpg", True)])
+        # Two messages before, it comes along after the new one, marked as only for context.
+        rows = [photo("latte.jpg"), her, photo("coffee.jpg")]
+        self.assertEqual([(back, row["image_file"], current) for back, row, current in shown_pictures(rows)],
+                         [(0, "coffee.jpg", True), (2, "latte.jpg", False)])
+        # A set sent together keeps its order, and a question about it answers the whole set.
+        rows = [photo("a.jpg"), photo("b.jpg"), her, say("which one is better?")]
+        self.assertEqual([(row["image_file"], current) for _, row, current in shown_pictures(rows)],
+                         [("a.jpg", True), ("b.jpg", True)])
+
     def test_several_photos_are_a_message_each_and_she_answers_them_together(self):
         events, seen = self.run_turn([[{"content": "Both are lovely, the second more 😍"}]], text="which one?",
                                      photo=[png("red"), png("blue")])
