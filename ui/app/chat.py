@@ -86,6 +86,32 @@ ASKS_IN_TEXT = re.compile(r"\b(?:selfies?|pics?|pictures?|photos?|nudes?|snaps?)
                           re.IGNORECASE)
 
 
+# A short go-ahead ("another one?", "yes please", "click!!"): asks for a picture only right after picture talk.
+FOLLOW_UP = re.compile(
+    r"^\W*(?:\w+\W+){0,3}?(?:another|one more|again|more|yes+|yeah|yep|yup|sure|please|pls|ok(?:ay)?|go(?: ahead| on)?|"
+    r"do it|click|snap|shoot|take it|send it|now|haan|ha+|ji)\b[^.?!]{0,20}[.?!\s]*$", re.IGNORECASE)
+# ...unless it says no: "no more", "not now", "enough", "later".
+NOT_NOW = re.compile(r"\b(?:no|nope|nah|not|don'?t|do not|stop|enough|later|wait)\b", re.IGNORECASE)
+# Her side of picture talk: a picture she sent, or her words about taking or sending one.
+PICTURE_TALK = re.compile(
+    r"\b(?:photos?|pics?|pictures?|selfies?|snaps?|shots?|click(?:ed|ing)?|camera|pose|smile for)\b|📸|📷",
+    re.IGNORECASE)
+
+
+def follows_picture_talk(rows: list[dict[str, Any]]) -> bool:
+    """Whether the owner's waiting messages are a go-ahead to her last reply that sent or talked about a picture:
+    after a picture, "another one?" and then "yes please" and "click!!" asked for one with no picture word
+    (23 November), and she got no camera."""
+    waiting = unanswered(rows)
+    words = (waiting[-1]["content"] or "") if waiting else ""
+    if not FOLLOW_UP.search(words) or NOT_NOW.search(words):
+        return False
+    before = rows[:len(rows) - len(waiting)]
+    last = next((row for row in reversed(before) if row["role"] != "user"
+                 and ((row["content"] or "").strip() or row.get("image_id"))), None)
+    return last is not None and (bool(last.get("image_id")) or bool(PICTURE_TALK.search(last["content"] or "")))
+
+
 def asks_for_picture(text: str, seeing: bool = False) -> bool:
     """Whether the owner's message asks her for a picture, leaving out what they say they will send. Beside a
     photo, only the plain asks: a picture word there is about their photo."""
@@ -710,7 +736,8 @@ class Conversation:
         seeing = self.saw = sees_pictures(rows)
         # She gets the camera only when the owner's message asks for a picture: a picture takes the GPU for
         # minutes, and "imma send you two images" got one nobody asked for.
-        may_draw = any(asks_for_picture(row["content"] or "", seeing) for row in unanswered(rows))
+        may_draw = (any(asks_for_picture(row["content"] or "", seeing) for row in unanswered(rows))
+                    or (not seeing and follows_picture_talk(rows)))
         if not may_draw:
             tools = [tool for tool in TOOLS if tool["function"]["name"] != "create_image"]
         if seeing:
