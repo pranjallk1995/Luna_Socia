@@ -23,7 +23,11 @@ umask 022
 if [ "${1:-prepare}" = prepare ] && [ -z "$(docker inspect "$name" --format '{{index .Config.Labels "devcontainer.local_folder"}}' 2>/dev/null)" ]; then
   docker rm -f "$name" >/dev/null 2>&1 || true
 fi
-docker build -q --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" -t luna-socia-notebooks:local "$here" >/dev/null
+# On the image the running Socia uses (the released one): her libraries, with no build of Socia's own. Her code
+# itself comes from this checkout (/workspace/ui), so the notebooks run what is here.
+base=$(docker inspect luna_socia-ui-1 --format '{{.Config.Image}}')
+docker build -q --build-arg BASE="$base" --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" \
+  -t luna-socia-notebooks:local "$here" >/dev/null
 [ "${1:-prepare}" = run ] || exit 0
 docker rm -f "$name" >/dev/null 2>&1 || true
 docker run -d --name "$name" --network luna_sentia_network --env-file "$here/.socia.env" \

@@ -1,5 +1,6 @@
 # Socia's own image with a Python kernel for VS Code: the notebooks run her code with her exact libraries.
-ARG BASE=ghcr.io/pranjallk1995/luna-socia-ui:dev
+# start.sh passes the image the running Socia uses.
+ARG BASE=ghcr.io/pranjallk1995/luna-socia-ui:v2.1.1
 FROM ${BASE}
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system ipykernel "nvidia-ml-py>=12" matplotlib
