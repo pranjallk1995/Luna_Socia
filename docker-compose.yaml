@@ -6,7 +6,7 @@ services:
   # the voice models on the data volume.
   ui:
     build: ./ui
-    image: ghcr.io/pranjallk1995/luna-socia-ui:${LUNA_IMAGE_TAG:-v2.0.4}
+    image: ghcr.io/pranjallk1995/luna-socia-ui:${LUNA_IMAGE_TAG:-v2.0.5}
     working_dir: /workspace/ui
     restart: unless-stopped
     gpus: all
