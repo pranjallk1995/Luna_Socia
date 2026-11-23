@@ -493,11 +493,12 @@ async function openHer(her, chatId) {
 function drawAbout(her) {
   $("about-name").textContent = her.name;
   $("about-style").textContent = [styleLabel(her), `${LABELS.length[her.persona.length]} replies`, LABELS.language[her.persona.language]].join(" · ");
-  // Her bio a line a bullet, without any dash or bullet the line already starts with: the first 6, and how many
-  // more there are (all of it is in Edit her).
+  // Her bio a line a bullet, without any dash or bullet the line already starts with: the first BIO_LINES, and how
+  // many more there are (all of it is in Edit her).
+  const BIO_LINES = 5;
   const bio = (her.persona.about || "").split("\n").map((line) => line.trim().replace(/^[-•*]\s*/, "")).filter(Boolean);
-  const shown = bio.slice(0, 6).map((line) => element("li", { textContent: line }));
-  if (bio.length > 6) shown.push(element("li", { className: "sc-about-more", textContent: `+${bio.length - 6} more in Edit her` }));
+  const shown = bio.slice(0, BIO_LINES).map((line) => element("li", { textContent: line }));
+  if (bio.length > BIO_LINES) shown.push(element("li", { className: "sc-about-more", textContent: `+${bio.length - BIO_LINES} more in Edit her` }));
   $("about-text").replaceChildren(...shown);
   $("about-voice").textContent = voiceLabel(her.voice);
   $("about-memory").textContent = memorySummary(her);
