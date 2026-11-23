@@ -456,6 +456,22 @@ class Conversation:
                 if named:
                     yield {"type": "chat", "chat": serialize_chat(named)}
 
+    async def resend(self, companion: dict[str, Any], chat_id: int, message_id: int, name: str,
+                     timezone: str | None) -> AsyncIterator[dict[str, Any]]:
+        """Answer one of the owner's messages again, after they edited it: what came after it is forgotten."""
+        async with self.turn:
+            files = await asyncio.to_thread(self.store.delete_after, chat_id, message_id)
+            for file in files:
+                (self.config.images_dir / file).unlink(missing_ok=True)
+            chat = await asyncio.to_thread(self.store.chat, chat_id)
+            yield {"type": "chat", "chat": serialize_chat(chat)}
+            async for event in self.answer(companion, chat_id, name, timezone):
+                yield event
+            if self.saw:
+                task = asyncio.create_task(self.back_to_chat())
+                self.background.add(task)
+                task.add_done_callback(self.background.discard)
+
     async def choose_app_tools(self, rows: list[dict[str, Any]], running: list[Any], her: str,
                                name: str) -> tuple[Any, list[dict[str, Any]]] | None:
         """The app the owner's last message needs and its few tools as her functions, or None."""

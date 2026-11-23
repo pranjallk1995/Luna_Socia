@@ -254,6 +254,14 @@ class MemoryStore:
     def image(self, image_id):
         return next((i for i in self.images if i["id"] == image_id), None)
 
+    def delete_after(self, chat_id, message_id):
+        gone = [m for m in self.messages if m["chat_id"] == chat_id and m["id"] > message_id]
+        self.messages = [m for m in self.messages if m not in gone]
+        used = {m["image_id"] for m in self.messages}
+        files = [i["file"] for i in self.images if i["id"] in {m["image_id"] for m in gone} and i["id"] not in used]
+        self.images = [i for i in self.images if i["file"] not in files]
+        return files
+
     def add_picture_references(self, companion_id, image_id, references):
         for reference in references:
             self.picture_references.append({"companion_id": companion_id, "reference": reference,
@@ -1068,6 +1076,24 @@ class ConversationTests(unittest.TestCase):
         second = [row["reference"] for row in self.store.picture_references[SociaConfig.PICTURE_REFERENCES:]]
         # The two never used go first, then two of the first picture's.
         self.assertEqual(set(second) - first, {path.name for path in self.config.references(self.her["id"])} - first)
+
+    def test_an_edited_message_is_answered_again_and_what_came_after_goes(self):
+        events, _ = self.run_turn([[{"content": "pizza it is"}]], text="pizza tonight?")
+        chat_id = events[0]["chat"]["id"]
+        self.run_turn([[{"content": "night!"}]], text="good night", chat_id=chat_id)
+        first = next(m for m in self.store.messages if m["content"] == "pizza tonight?")
+        self.store.edit_message(first["id"], "sushi tonight?")
+        seen: dict = {}
+        ollama_transport, images_transport = fake_services([[{"content": "sushi it is"}]], seen)
+        conversation = Conversation(self.config, self.store, Ollama(self.config, ollama_transport),
+                                    ImageService(self.config, images_transport), None, None)
+
+        async def collect():
+            return [e async for e in conversation.resend(self.store.companion(self.her["id"]), chat_id, first["id"], "Pranjall", "Asia/Kolkata")]
+
+        events = asyncio.run(collect())
+        self.assertEqual([m["content"] for m in self.store.messages if m["chat_id"] == chat_id], ["sushi tonight?", "sushi it is"])
+        self.assertEqual(events[-1]["type"], "done")
 
     def test_her_photo_comes_from_the_same_chat(self):
         self.run_turn([[{"content": "nice"}]], text="look", photo=png("red"))

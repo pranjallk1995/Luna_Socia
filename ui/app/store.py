@@ -573,6 +573,19 @@ class SociaStore:
                 "RETURNING file", (row["image_id"], row["image_id"])).fetchone()
         return [image["file"]] if image else []
 
+    def delete_after(self, chat_id: int, message_id: int) -> list[str]:
+        """Forget every message in a chat after one, with their photos and pictures; returns the image files to delete."""
+        with self.connect() as db, db.transaction():
+            rows = db.execute("DELETE FROM messages WHERE chat_id = %s AND id > %s RETURNING image_id",
+                              (chat_id, message_id)).fetchall()
+            images = [row["image_id"] for row in rows if row["image_id"] is not None]
+            if not images:
+                return []
+            gone = db.execute(
+                "DELETE FROM images i WHERE i.id = ANY(%s) AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.image_id = i.id) "
+                "RETURNING file", (images,)).fetchall()
+        return [row["file"] for row in gone]
+
     def edit_message(self, message_id: int, content: str) -> dict[str, Any] | None:
         """New words for a message, marked edited; the message, or None if there is none."""
         with self.connect() as db:

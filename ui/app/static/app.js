@@ -491,7 +491,10 @@ async function openHer(her, chatId) {
 function drawAbout(her) {
   $("about-name").textContent = her.name;
   $("about-style").textContent = [styleLabel(her), `${LABELS.length[her.persona.length]} replies`, LABELS.language[her.persona.language]].join(" · ");
-  $("about-text").textContent = her.persona.about;
+  // Her bio a line a bullet, without any dash or bullet the line already starts with.
+  $("about-text").replaceChildren(...(her.persona.about || "").split("\n")
+    .map((line) => line.trim().replace(/^[-•*]\s*/, "")).filter(Boolean)
+    .map((line) => element("li", { textContent: line })));
   $("about-voice").textContent = voiceLabel(her.voice);
   $("about-memory").textContent = memorySummary(her);
   $("about-chats").textContent = String(her.chats);
@@ -795,7 +798,7 @@ function meta(message) {
 }
 
 // New words for one of your messages, typed in place of it: Enter saves, Esc or Cancel leaves it as it was.
-// She reads the new words from her next reply on; what she already answered stays.
+// Saving sends it again: what came after it goes, and she answers the new words.
 function editMessage(message, item) {
   const row = item?.querySelector(".sc-bubble-row");
   if (!row || item.querySelector(".sc-edit-form")) return;
@@ -811,6 +814,11 @@ function editMessage(message, item) {
     const content = box.value.trim();
     if (!content) { alert("Say something, or delete the message."); return; }
     if (content === message.content) { close(); return; }
+    if (state.sending) { alert(`Wait for ${state.her?.name ?? "her"} to finish answering, then edit it.`); return; }
+    const later = [];
+    for (let next = item.nextElementSibling; next; next = next.nextElementSibling) later.push(next);
+    const yours = later.filter((next) => next.classList.contains("sc-user")).length;
+    if (yours && !confirm(`Saving sends it again, and the ${later.filter((n) => n.classList.contains("sc-message")).length} messages after it are deleted, ${yours} of them yours. Go on?`)) return;
     save.disabled = true;
     const reply = await fetch(`/api/messages/${message.id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content }),
@@ -822,6 +830,8 @@ function editMessage(message, item) {
       return;
     }
     item.replaceWith(messageElement((await reply.json()).message));
+    later.forEach((next) => next.remove());
+    resend(message.id);
   };
   box.addEventListener("input", fit);
   box.addEventListener("keydown", (event) => {
@@ -1112,16 +1122,7 @@ async function send(words) {
   reply.element.remove();
   // A photo shows straight away, with how much of it has gone up.
   reply.pending = photos.length ? pendingPhoto(photos, message) : null;
-  let buffer = "";
-  const read = (piece) => {
-    buffer += piece;
-    let end;
-    while ((end = buffer.indexOf("\n\n")) >= 0) {
-      const chunk = buffer.slice(0, end);
-      buffer = buffer.slice(end + 2);
-      if (chunk.startsWith("data: ")) handle(JSON.parse(chunk.slice(6)), reply);
-    }
-  };
+  const read = eventReader(reply);
   try {
     const answer = await postStream("/api/send", form, (sent) => reply.pending?.progress(sent), read);
     if (answer.status !== 200) {
@@ -1143,6 +1144,49 @@ async function send(words) {
     $("send").disabled = false;
     setPresence("online");
     text.focus();
+    loadChats();
+  }
+}
+
+// Her answer's events as they stream in, each handled as it completes.
+function eventReader(reply) {
+  let buffer = "";
+  return (piece) => {
+    buffer += piece;
+    let end;
+    while ((end = buffer.indexOf("\n\n")) >= 0) {
+      const chunk = buffer.slice(0, end);
+      buffer = buffer.slice(end + 2);
+      if (chunk.startsWith("data: ")) handle(JSON.parse(chunk.slice(6)), reply);
+    }
+  };
+}
+
+// One of your messages sent again after you edited it: she answers its new words.
+async function resend(id) {
+  if (state.sending || !state.her || !state.chat) return;
+  state.sending = true;
+  $("send").disabled = true;
+  const form = new FormData();
+  form.append("companion_id", state.her.id);
+  form.append("chat_id", state.chat.id);
+  form.append("resend", id);
+  form.append("timezone", Intl.DateTimeFormat().resolvedOptions().timeZone || "");
+  const reply = replyElement();
+  try {
+    const answer = await postStream("/api/send", form, () => {}, eventReader(reply));
+    if (answer.status !== 200) {
+      let error = `HTTP ${answer.status}`;
+      try { error = JSON.parse(answer.responseText).error || error; } catch {}
+      throw new Error(error);
+    }
+  } catch (error) {
+    handle({ type: "error", text: error.message }, reply);
+    reply.typing.remove();
+  } finally {
+    state.sending = false;
+    $("send").disabled = false;
+    setPresence("online");
     loadChats();
   }
 }

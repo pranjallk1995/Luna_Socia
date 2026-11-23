@@ -356,13 +356,19 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         if len(uploads) > SociaConfig.PHOTOS_SEEN:
             return JSONResponse({"error": f"Send {SociaConfig.PHOTOS_SEEN} photos at most at once."}, 400)
         photo = [await upload.read() for upload in uploads]
-        if not text and not photo:
-            return JSONResponse({"error": "Say something or send a photo."}, 400)
         try:
             companion_id = int(form.get("companion_id") or "")
             chat_id = int(form["chat_id"]) if form.get("chat_id") else None
+            # One of your messages to answer again, after you edited it; what came after it goes.
+            resend = int(form["resend"]) if form.get("resend") else None
         except ValueError:
-            return JSONResponse({"error": "companion_id and chat_id must be ids"}, 400)
+            return JSONResponse({"error": "companion_id, chat_id and resend must be ids"}, 400)
+        if resend is not None:
+            again = await asyncio.to_thread(store.message, resend)
+            if again is None or again["role"] != "user" or chat_id is None or again["chat_id"] != chat_id:
+                return JSONResponse({"error": "That message is not one of yours in this chat."}, 404)
+        elif not text and not photo:
+            return JSONResponse({"error": "Say something or send a photo."}, 400)
         row = await asyncio.to_thread(store.companion, companion_id)
         if row is None:
             return JSONResponse({"error": "That girlfriend was deleted."}, 404)
@@ -379,8 +385,11 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
 
         async def reply() -> None:
             try:
-                async for event in conversation.send(row, chat_id, text, photo or None, await owner_name(user),
-                                                     str(form.get("timezone") or "")):
+                answer = (conversation.resend(row, chat_id, resend, await owner_name(user), str(form.get("timezone") or ""))
+                          if resend is not None else
+                          conversation.send(row, chat_id, text, photo or None, await owner_name(user),
+                                            str(form.get("timezone") or "")))
+                async for event in answer:
                     queue.put_nowait(event)
             except Exception as error:  # noqa: BLE001 - shown in the chat
                 logger.exception("Her answer failed")
