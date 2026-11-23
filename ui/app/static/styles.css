@@ -523,3 +523,4 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-profile-row { justify-content: center; }
 .sc-profile-actions { flex: 0 1 16rem; }
 .sc-group:has(> .sc-profile-row) > h3 { text-align: center; }
+.sc-about-text .sc-about-more { list-style: none; margin-left: -1.1rem; color: var(--lv-muted); font-size: var(--luna-text-small); }
