@@ -596,6 +596,23 @@ class ConversationTests(unittest.TestCase):
         self.assertIn("image", [event["type"] for event in events])
         self.assertIn("picture", seen)
 
+    def test_an_empty_reply_is_asked_again_with_thinking_allowed(self):
+        # 22-23 November: she reasoned though told not to, Ollama dropped it, and nothing was left.
+        events, seen = self.run_turn([[{"content": ""}], [{"thinking": "They said hi.", "content": "Hey you ❤️"}]],
+                                     text="hey")
+        chats = streamed(seen)
+        self.assertEqual([chat["think"] for chat in chats], [False, True])
+        self.assertEqual(events[-2]["message"]["content"], "Hey you ❤️")
+        # Empty twice: the last try goes without tools.
+        events, seen = self.run_turn([[{"content": ""}], [{"thinking": "Hmm."}], [{"content": "Hi ❤️"}]], text="hey")
+        self.assertEqual(["tools" in chat for chat in streamed(seen)], [True, True, False])
+        self.assertEqual(events[-2]["message"]["content"], "Hi ❤️")
+
+    def test_an_empty_reply_of_hers_is_left_out_of_the_history(self):
+        rows = [{"role": "user", "content": "selfie babe!"}, {"role": "luna", "content": ""},
+                {"role": "user", "content": "hey"}]
+        self.assertEqual([m["role"] for m in model_messages(rows)], ["user", "user"])
+
     def test_only_her_own_promises_of_a_picture_count(self):
         # Her replies on 16 November that got a picture nobody asked for, and ones that promised one.
         for reply in ["Aww, Melon! That's such a cute photo 😊", "I'm ready when you are! Bring it on! 🥰",

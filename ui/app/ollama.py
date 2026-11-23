@@ -29,8 +29,10 @@ class Ollama:
                                         timeout=httpx.Timeout(300.0, connect=10.0))
 
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
-                   seeing: bool = False) -> AsyncIterator[dict[str, Any]]:
+                   seeing: bool = False, think: bool = False) -> AsyncIterator[dict[str, Any]]:
         """Stream Luna's reply: {"text": ...} pieces, then {"tool_calls": [...]} if she uses a tool.
+
+        ``think``: let her reason first; the reasoning comes back apart from the reply and is not shown.
 
         ``seeing``: the vision model answers instead, at its own context, with the photos in ``messages``.
         """
@@ -39,7 +41,7 @@ class Ollama:
             "messages": messages,
             "stream": True,
             # Qwen3 thinks before answering unless told not to; a text reply needs no reasoning.
-            "think": False,
+            "think": think,
             # The repeat penalty keeps her from echoing her own recent words.
             "options": {"num_ctx": self.config.vision_context_tokens if seeing else self.config.context_tokens,
                         "temperature": self.config.temperature,

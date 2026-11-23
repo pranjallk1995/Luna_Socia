@@ -285,7 +285,9 @@ def model_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 reacted.append(f'[Reacted {row["reaction"]} to your message: "{said_what}"]')
             picture = row.get("image_prompt") if row.get("image_kind") == "generated" else None
             key = " ".join(f"{content} {picture or ''}".split()).casefold()
-            if key in said:
+            # A reply that came out empty is left out too: an empty turn of hers in the history makes the
+            # next one likelier to be empty.
+            if key in said or not key:
                 continue
             said.add(key)
             if picture:
@@ -623,6 +625,29 @@ class Conversation:
         return [*messages[:-1], {**last, "content": f"{last['content']}\n[Pictures you see now: {listed}]".strip(),
                                  "images": [base64.b64encode(picture).decode() for picture in pictures]}]
 
+    async def reply_or_retry(self, pieces: AsyncIterator[dict[str, Any]], messages: list[dict[str, Any]],
+                             tools: list[dict[str, Any]] | None, seeing: bool) -> AsyncIterator[dict[str, Any]]:
+        """Her reply; if it came out with no words and no tool call, asked again, letting her think first.
+
+        Her chat model (an abliterated Qwen3 8B) sometimes reasons even when told not to. Ollama drops the
+        reasoning, and when she stops right after it nothing is left: every reply from 22 to 23 November was
+        empty. Allowed to think, she answers after it, and only the answer is shown.
+        """
+        # Then, if that is empty too, without tools: in a test on her chat of 23 November that always had words.
+        tries = [pieces, self.ollama.chat(messages, tools, seeing=seeing, think=True),
+                 self.ollama.chat(messages, seeing=seeing)]
+        for number, attempt in enumerate(tries):
+            if number:
+                logger.warning("Her reply came out empty; asking again (%s)",
+                               "thinking allowed" if number == 1 else "without tools")
+            empty = True
+            async for piece in attempt:
+                if piece.get("text", "").strip() or piece.get("tool_calls"):
+                    empty = False
+                yield piece
+            if not empty:
+                return
+
     async def answer(self, companion: dict[str, Any], chat_id: int, name: str,
                      timezone: str | None) -> AsyncIterator[dict[str, Any]]:
         rows = await asyncio.to_thread(self.store.recent, chat_id, SociaConfig.HISTORY_MESSAGES)
@@ -682,7 +707,8 @@ class Conversation:
         try:
             for _ in range(MAX_APP_ROUNDS + 1):
                 said, asked, shown = "", [], 0
-                async for piece in self.ollama.chat(messages, tools, seeing=seeing):
+                pieces = self.ollama.chat(messages, tools, seeing=seeing)
+                async for piece in self.reply_or_retry(pieces, messages, tools, seeing):
                     if "text" in piece:
                         said += piece["text"]
                         # A tool call she writes out as text never reaches the page.
