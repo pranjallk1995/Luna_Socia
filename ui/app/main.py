@@ -70,6 +70,8 @@ def main() -> None:
     conversation = Conversation(config, store, ollama, images, apps, faces, rememberer, recall)
     reader = MemoryReader(store, ollama, conversation.turn, config.read_chats)
     voice = Voice(config)
+    # Off the GPU while a picture is drawn, and back after.
+    images.gpu_sharers.append(voice)
     # Her voice loads and warms up beside the server starting, not on the first voice message.
     threading.Thread(target=voice.preload, name="voice-preload", daemon=True).start()
     app = create_app(config, store, conversation, images, voice, reader=reader, apps=apps)

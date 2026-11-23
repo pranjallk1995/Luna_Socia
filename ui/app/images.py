@@ -4,7 +4,8 @@ profile picture.
 The service takes the GPU to itself for each picture: it unloads Ollama's models, reads the prompt and up to
 16 reference pictures (which its text encoder both sees and splices into the picture's latents; the picture
 takes the first one's shape), draws in 8 steps, and leaves the GPU empty for the monitor to load her models
-back. Socia sends the prompt and references, then asks until the picture is done.
+back. Socia sends the prompt and references, then asks until the picture is done. Her voice models leave the GPU
+for it too, and come back after.
 """
 
 from __future__ import annotations
@@ -31,6 +32,10 @@ class ImageService:
         self.config = config
         self.client = httpx.AsyncClient(base_url=config.imagegen_url, transport=transport,
                                         timeout=httpx.Timeout(60.0, connect=5.0))
+        # Models of hers on the GPU (her voice) that give it up while a picture is drawn: each has release()
+        # and resume(), run in a thread.
+        self.gpu_sharers: list = []
+        self.resuming: set[asyncio.Task] = set()
 
     async def available(self) -> bool:
         try:
@@ -40,6 +45,18 @@ class ImageService:
             return False
 
     async def generate(self, prompt: str, references: list[bytes]) -> bytes:
+        for sharer in self.gpu_sharers:
+            await asyncio.to_thread(sharer.release)
+        try:
+            return await self.draw(prompt, references)
+        finally:
+            # Back in the background: her reply with the picture does not wait for them.
+            for sharer in self.gpu_sharers:
+                task = asyncio.create_task(asyncio.to_thread(sharer.resume))
+                self.resuming.add(task)
+                task.add_done_callback(self.resuming.discard)
+
+    async def draw(self, prompt: str, references: list[bytes]) -> bytes:
         reply = await self.client.post("/pictures", json={
             "prompt": prompt, "resolution": self.config.image_resolution,
             "references": [base64.b64encode(image).decode() for image in references]})

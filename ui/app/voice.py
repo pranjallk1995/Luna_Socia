@@ -9,6 +9,7 @@ volume for the next start. If the GPU cannot be used, they run on the CPU instea
 
 from __future__ import annotations
 
+import gc
 import io
 import logging
 import os
@@ -61,6 +62,9 @@ class Voice:
         self.lock = threading.Lock()
         self.whisper = None
         self.kokoro = None
+        # While a picture is drawn, her voice gives the GPU up (release), and a voice message meanwhile is
+        # heard and read on the CPU; resume() moves both back.
+        self.paused = False
         # Where each one actually runs, once loaded: "GPU" or "CPU".
         self.whisper_device = self.kokoro_device = ""
         # For Luna Sentia's model monitor, which cannot see models that run outside Ollama.
@@ -71,13 +75,44 @@ class Voice:
                                    lambda: self._state(self.kokoro, self.kokoro_device))
 
     def _state(self, model, device: str) -> tuple[bool, str]:
+        if model is None and self.paused:
+            return False, "off the GPU while a picture is drawn; back after it"
         if model is None:
             return False, f"loads at start ({self.config.voice_device.upper()}); stays loaded"
         return True, device
 
     @property
     def on_gpu(self) -> bool:
-        return self.config.voice_device == "cuda"
+        return self.config.voice_device == "cuda" and not self.paused
+
+    def release(self) -> None:
+        """Give the GPU up for a picture: both models are unloaded, waiting for a reply being read aloud."""
+        if self.config.voice_device != "cuda":
+            return
+        with self.lock:
+            self.paused = True
+            if self.whisper is not None and self.whisper_device.startswith("GPU"):
+                try:
+                    self.whisper.model.unload_model()
+                except Exception:  # noqa: BLE001 - dropping it frees it too
+                    pass
+            self.whisper = self.kokoro = None
+            self.whisper_device = self.kokoro_device = ""
+        gc.collect()
+        logger.info("Her voice is off the GPU while a picture is drawn")
+
+    def resume(self) -> None:
+        """Back on the GPU after a picture; one loaded on the CPU meanwhile is dropped for it."""
+        if self.config.voice_device != "cuda" or not self.paused:
+            return
+        with self.lock:
+            self.paused = False
+            if not self.whisper_device.startswith("GPU"):
+                self.whisper, self.whisper_device = None, ""
+            if not self.kokoro_device.startswith("GPU"):
+                self.kokoro, self.kokoro_device = None, ""
+        gc.collect()
+        self.preload()
 
     def _load_whisper(self) -> None:
         if self.whisper is not None:

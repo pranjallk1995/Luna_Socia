@@ -1,6 +1,7 @@
 """Tests for Luna Socia: the gate, girlfriends and their memory, what she reads, her pictures, and full turns."""
 
 import asyncio
+import dataclasses
 import io
 import json
 import tempfile
@@ -22,7 +23,7 @@ from app.store import without_fact
 from app.images import ImageError, ImageService
 from app.ollama import Ollama
 from app.persona import DEFAULT_PERSONA, clean_persona, image_prompt, system_prompt
-from app.voice import language, speakable
+from app.voice import Voice, language, speakable
 from app.web import create_app
 
 NOW = datetime(2026, 11, 10, 20, 30, tzinfo=timezone.utc)
@@ -478,6 +479,44 @@ class ImageServiceTests(unittest.TestCase):
         self.assertEqual(image, png("blue"))
         self.assertEqual(sent[1], {"prompt": "a selfie", "resolution": 1024, "references": ["ZmFjZQ=="]})
         self.assertEqual(sent[-1], ("GET", "/pictures/p1/image"))
+
+    def test_her_voice_leaves_the_gpu_for_a_picture_and_comes_back_even_if_it_fails(self):
+        events = []
+
+        class Sharer:
+            def release(self):
+                events.append("release")
+
+            def resume(self):
+                events.append("resume")
+
+        def imagegen(request):
+            events.append(request.method)
+            return httpx.Response(503, json={"error": "still being prepared"})
+
+        async def run():
+            service = ImageService(config(), httpx.MockTransport(imagegen))
+            service.gpu_sharers.append(Sharer())
+            with self.assertRaises(ImageError):
+                await service.generate("a selfie", [])
+            await asyncio.gather(*service.resuming)
+
+        asyncio.run(run())
+        self.assertEqual(events, ["release", "POST", "resume"])
+
+    def test_her_voice_released_is_heard_on_the_cpu_until_it_resumes(self):
+        voice = Voice(config())
+        voice.config = dataclasses.replace(voice.config, voice_device="cuda")
+        voice.whisper, voice.whisper_device = object(), "GPU (int8/float16)"
+        voice.kokoro, voice.kokoro_device = object(), "GPU (ONNX, CUDA)"
+        voice.release()
+        self.assertEqual((voice.whisper, voice.kokoro, voice.on_gpu), (None, None, False))
+        self.assertIn("picture", voice.speaking.status()["device"])
+        loaded = []
+        voice.preload = lambda: loaded.append(voice.on_gpu)
+        voice.whisper, voice.whisper_device = object(), "CPU (int8)"
+        voice.resume()
+        self.assertEqual((voice.whisper, loaded), (None, [True]))
 
     def test_a_refused_or_failed_picture_says_why(self):
         import app.images
