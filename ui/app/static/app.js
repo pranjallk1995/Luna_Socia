@@ -274,7 +274,9 @@ async function openEditor(her) {
   $("her-delete").hidden = !her;
   $("her-name").value = her?.name ?? "";
   $("her-name").maxLength = options.limits.name;
-  $("her-about").value = her?.persona.about ?? "";
+  // Her bio as her memory of you shows: a "- " line each (a bio from before is shown that way too).
+  $("her-about").value = (her?.persona.about ?? "").split("\n").map((line) => line.trim().replace(/^[-•*]\s*/, ""))
+    .filter(Boolean).map((line) => `- ${line}`).join("\n");
   $("her-about").maxLength = options.limits.about;
   $("her-nude").checked = her?.persona.nude_pictures === "on";
   $("her-memory").value = her?.memory ?? "";

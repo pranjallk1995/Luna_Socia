@@ -111,6 +111,12 @@ REACTIONS = ["❤️", "😂", "😘", "😮", "😢", "🔥", "👍"]
 PICTOGRAPHS = re.compile("[\U0001f000-\U0001faff\u2600-\u27bf\ufe0f\u200d]+")
 
 
+def dashed(text: str) -> str:
+    """A bio as her memory is written: each line starting with "- ", blank lines left out."""
+    lines = (line.strip().lstrip("-•*").strip() for line in text.splitlines())
+    return "\n".join(f"- {line}" for line in lines if line)
+
+
 def clean_persona(
     values: dict[str, Any], current: dict[str, Any] | None = None
 ) -> dict[str, str]:
@@ -120,9 +126,7 @@ def clean_persona(
         if str(values.get(key, "")) in options:
             persona[key] = str(values[key])
     if "about" in values:
-        persona["about"] = str(values.get("about") or "").strip()[
-            : SociaConfig.ABOUT_CHARS
-        ]
+        persona["about"] = dashed(str(values.get("about") or ""))[: SociaConfig.ABOUT_CHARS]
     if "nude_pictures" in values:
         # "on" only when the owner ticked that her face is AI-generated, not a real person's.
         persona["nude_pictures"] = (

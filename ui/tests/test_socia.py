@@ -1364,7 +1364,7 @@ class GirlfriendTests(unittest.TestCase):
         self.assertEqual(created.status_code, 201)
         her = created.json()["companion"]
         self.assertEqual((her["name"], her["voice"]), ("Maya", "bf_emma"))
-        self.assertEqual(her["persona"], {**DEFAULT_PERSONA, "style": "sassy", "emoji": "none", "about": "An architect."})
+        self.assertEqual(her["persona"], {**DEFAULT_PERSONA, "style": "sassy", "emoji": "none", "about": "- An architect."})
         self.assertFalse(her["has_profile"])
         self.assertEqual(self.client.post("/api/companions", json={"name": " "}).status_code, 400)
         self.assertEqual(self.client.post("/api/companions", json={"name": "A", "voice": "am_adam"}).status_code, 400)

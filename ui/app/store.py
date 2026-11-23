@@ -15,6 +15,8 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from app.persona import dashed
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chats (
     id BIGSERIAL PRIMARY KEY,
@@ -199,7 +201,7 @@ def without_fact(text: str, about: str, fact: str) -> tuple[str, bool]:
     rest = text[:at] + text[at + len(sentence):]
     # The sentence's own line goes with it; inside a line, one space is left between its neighbours.
     lines = [" ".join(line.split()) for line in rest.splitlines()]
-    return "\n".join(line for line in lines if line), True
+    return "\n".join(line for line in lines if line.strip("- ")), True
 
 
 MESSAGE_COLUMNS = """m.id, m.chat_id, m.role, m.content, m.image_id, m.photo_note, m.reaction, m.apps, m.created_at, m.edited_at, m.remembered,
@@ -375,7 +377,7 @@ class SociaStore:
             row = db.execute("SELECT persona FROM companions WHERE id = %s FOR UPDATE", (companion_id,)).fetchone()
             if row is None:
                 return []
-            about = str((row["persona"] or {}).get("about") or "").strip()
+            about = dashed(str((row["persona"] or {}).get("about") or ""))
             added = []
             for fact in facts:
                 sentence = fact.removeprefix("- ").strip()
@@ -384,9 +386,9 @@ class SociaStore:
                 sentence = sentence[0].upper() + sentence[1:]
                 if not sentence.endswith((".", "!", "?")):
                     sentence += "."
-                if sentence.casefold() in about.casefold() or len(about) + len(sentence) + 1 > limit:
+                if sentence.casefold() in about.casefold() or len(about) + len(sentence) + 3 > limit:
                     continue
-                about = f"{about}\n{sentence}".strip()
+                about = f"{about}\n- {sentence}".strip()
                 added.append(sentence)
             if added:
                 db.execute("UPDATE companions SET persona = persona || jsonb_build_object('about', %s::text), "
