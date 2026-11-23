@@ -512,3 +512,7 @@ button, textarea, input, select { font: inherit; color: inherit; }
 @media (min-width: 720px) { .sc-ref-grid { grid-template-columns: repeat(4, 1fr); } }
 .sc-group .sc-luna-apps:empty { display: none; }
 @media (max-width: 480px) { .sc-models > div { grid-template-columns: 4.2rem 1fr; } }
+/* The picture and its actions sit together in the middle of their card. */
+.sc-profile-row { justify-content: center; }
+.sc-profile-actions { flex: 0 1 16rem; }
+.sc-group:has(> .sc-profile-row) > h3 { text-align: center; }
