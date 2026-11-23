@@ -41,7 +41,7 @@ Socia is one service (`ui`): the page and its API, behind Luna's single sign-on.
 | Chat | `LUNASOCIA_CHAT_MODEL` (default `huihui_ai/qwen3-abliterated:8b`, an uncensored Qwen3 8B, about 5.2 GB with 8k context), resident on the GPU | Sentia's Ollama, through its monitor, on the GPU | Compare it with [`model_evaluations/`](model_evaluations/README.md) and check it fits with Sentia's `model_checks/check_model.py --context 8192` |
 | Photos sent to Luna | `LUNASOCIA_VISION_MODEL` (default `huihui_ai/qwen3-vl-abliterated:8b-instruct`, an uncensored Qwen3-VL 8B, about 6.1 GB with 16k context, the model every Luna app shares) sees them and answers as her, then describes each photo for her later replies (`LUNASOCIA_VISION_CONTEXT_TOKENS`, default 16384, the context the other apps ask for, so Ollama does not reload it). It takes the chat model's place on the GPU for that reply | Sentia's Ollama, on the GPU | Socia's cat game (`model_evaluations/`), then a few photos by hand |
 | Faces in photos | InsightFace `buffalo_l` (SCRFD finds faces, ArcFace makes a face print of each), compared with her profile picture and other pictures, and with your photos in "Photos of you" (similar enough at `FACE_MATCH` 0.55). Paired with the vision model: it tells it whose faces are in each picture | Here, on the GPU (about 0.4 GB, 50 ms a photo): they load with the vision model for a photo and leave with it. Downloaded once to the data volume | `model_evaluations/self_recognition.py` |
-| Pictures of Luna | Qwen-Image 2.1 Turbo, 8 steps; her profile picture and 2 of up to 6 other pictures of her are the face references, drawn at random: those used lately less often, and a little more often those in pictures you liked (❤️ 😘 🔥 👍), so her poses vary | Sentia's image service (diffusers), on the GPU | A few pictures by hand |
+| Pictures of Luna | Qwen-Image 2.1 Turbo, 8 steps; 3 of her pictures (her profile picture and up to 6 others) are the face references, drawn at random: those used lately less often, and a little more often those in pictures you liked (❤️ 😘 🔥 👍), so her poses vary | Sentia's image service (diffusers), on the GPU | A few pictures by hand |
 | Voice messages | faster-whisper `LUNASOCIA_STT_MODEL` (default `large-v3-turbo`, int8/float16) | Here, on the GPU (`LUNASOCIA_VOICE_DEVICE`, default `cuda`; `cpu` to keep it off the GPU), loaded at start | A few voice messages by hand |
 | Her voice | Kokoro 82M, in the voice chosen for her (16 female English and Hindi voices; `LUNASOCIA_TTS_VOICE`, default `af_heart`, for new girlfriends) | Here, on the GPU with Whisper (about 1.5 GB for both, and 0.2 GB for CUDA), loaded at start. Socia measures what each model takes as it loads and reports it to Sentia's monitor | Listen to a few replies |
 | Her memory | The chat model reads imported ChatGPT or Claude chats for facts about you, in the background; reading her own chats too is off until it is reliable (`LUNASOCIA_READ_CHATS=1`) | Sentia's Ollama, on the GPU, only while no reply is being written | `model_evaluations/remember.py`, then import a small export and read what she remembers |
@@ -146,11 +146,11 @@ Create one from the card on the landing page, and change her later with "Edit he
 
 - **Who she is:** her name, and anything you write about her (age, work, what she loves,
   how you met), which goes into her persona.
-- **Her picture:** her profile picture is her face in every picture she takes. Crop her
-  avatar and add up to 6 more pictures of her, in different poses, from her chat's settings.
-  Each picture of her takes 2 of them at random, so her poses vary: each use raises a picture's
-  score, which wears off with time, and the higher it is the less likely it is drawn; ones in
-  pictures you react to with ❤️ 😘 🔥 or 👍 come back a little sooner.
+- **Her picture:** crop her avatar and add up to 6 more pictures of her, in different poses,
+  from her chat's settings; with her profile picture, they show her face. Each picture of her takes 3 of them at random,
+  her profile picture like any other, so no one picture sets her face and look: each use raises
+  a picture's score, which wears off with time, and the higher it is the less likely it is drawn;
+  ones in pictures you react to with ❤️ 😘 🔥 or 👍 come back a little sooner.
 - **How she texts:** one of five styles (playful, sweet, sassy, shy, calm), reply length,
   how many emoji, and her language (yours, English, Hinglish, or Hindi in Devanagari).
 - **Her voice:** one of Kokoro's English and Hindi voices, each with a sample to play.

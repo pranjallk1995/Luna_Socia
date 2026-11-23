@@ -995,16 +995,15 @@ class Conversation:
 
     async def picture(self, companion_id: int, chat_id: int, arguments: dict[str, Any]) -> int:
         description = plain_description(arguments.get("description")) or "a cosy selfie"
+        # Her pictures, her profile picture among them, drawn at random, the ones used lately less likely
+        # (app/poses.py): no one picture of hers sets her face and look in every picture.
         profile = self.config.profile_path(companion_id)
-        # Her profile picture first, then 2 of her other pictures drawn at random, those used lately less likely; none without a profile picture.
-        others: list[Path] = []
-        with_her = bool(arguments.get("include_luna")) and profile.exists()
-        if with_her:
+        pool = [profile] * profile.exists() + self.config.references(companion_id)
+        lunas: list[Path] = []
+        if arguments.get("include_luna") and pool:
             history = await asyncio.to_thread(self.store.reference_history, companion_id,
                                               list(SociaConfig.LIKED_REACTIONS))
-            others = poses.chosen(self.config.references(companion_id), history, datetime.now(timezone.utc),
-                                  SociaConfig.PICTURE_REFERENCES)
-        lunas = [profile, *others] if with_her else []
+            lunas = poses.chosen(pool, history, datetime.now(timezone.utc), SociaConfig.PICTURE_REFERENCES)
         photo = await asyncio.to_thread(self.store.last_photo, chat_id) if arguments.get("use_their_photo") else None
         prompt, order = image_prompt(description, len(lunas), photo is not None)
         pictures = {"luna": iter(lunas), "photo": iter([self.config.images_dir / photo["file"]] if photo else [])}
@@ -1013,7 +1012,7 @@ class Conversation:
         image = await self.images.generate(prompt, references)
         file = await asyncio.to_thread(self.save_file, image, ".png")
         image_id = await asyncio.to_thread(self.store.add_image, chat_id, "generated", file, description)
-        if others:
+        if lunas:
             await asyncio.to_thread(self.store.add_picture_references, companion_id, image_id,
-                                    [path.name for path in others])
+                                    [path.name for path in lunas])
         return image_id

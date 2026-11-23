@@ -27,10 +27,10 @@ class SociaConfig:
     # Largest photo or voice clip accepted from the page.
     MAX_UPLOAD_BYTES: ClassVar[int] = 25 * 1024 * 1024
     # More pictures of Luna besides her profile picture: they keep her face the same at other angles. Each
-    # picture of her takes her profile picture and PICTURE_REFERENCES of these drawn at random, the ones used most
-    # lately least likely (app/poses.py), so her poses vary: 3 pictures in all; each one more makes a picture slower.
+    # picture of her takes PICTURE_REFERENCES of these and her profile picture, drawn at random, the ones used most
+    # lately least likely (app/poses.py), so her face and poses vary; each one more makes a picture slower.
     MAX_REFERENCES: ClassVar[int] = 6
-    PICTURE_REFERENCES: ClassVar[int] = 2
+    PICTURE_REFERENCES: ClassVar[int] = 3
     # The owner's reactions on a picture of her that count as liking it, and how much each like raises the
     # chance of the pictures it used being drawn again (times ln(1 + likes)).
     LIKED_REACTIONS: ClassVar[tuple[str, ...]] = ("❤️", "😘", "🔥", "👍")
@@ -158,7 +158,7 @@ class SociaConfig:
         return self.data_dir / "companions" / str(companion_id)
 
     def profile_path(self, companion_id: int) -> Path:
-        """Her profile picture: her face in every image she appears in."""
+        """Her profile picture: one of the pictures of her face that her pictures are drawn from."""
         return self.companion_dir(companion_id) / "profile.png"
 
     @property

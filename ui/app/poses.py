@@ -1,7 +1,7 @@
 """Which of her other pictures go with a picture of her: drawn at random, the ones used most lately least likely.
 
-Her profile picture goes with every picture of her (her face). Of her other pictures, up to
-SociaConfig.MAX_REFERENCES of them, PICTURE_REFERENCES are drawn at random. Each has a score: every time it is used
+Of her profile picture and her other pictures (up to SociaConfig.MAX_REFERENCES of them), PICTURE_REFERENCES are
+drawn at random: her profile picture is one like the others, so it does not set her face in every picture. Each has a score: every time it is used
 its score goes up by 1 / sqrt(days since), so it rises with each use and wears off with time, like her memory's
 ACT-R base-level activation (recall.strength). The higher the score, the less likely it is drawn: its weight is
 1 / (1 + score), so one never used weighs 1, one used an hour ago about 0.17, one used a week ago about 0.73.

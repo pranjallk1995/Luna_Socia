@@ -1150,7 +1150,7 @@ class ConversationTests(unittest.TestCase):
         self.assertIn("<image1>, <image2> and <image3> are pictures of the same woman", seen["picture"]["prompt"])
         self.assertEqual(self.config.references(self.her["id"]), [folder / "1-aaaaaaaa.jpg", folder / "2-bbbbbbbb.jpg"])
 
-    def test_each_picture_of_her_takes_her_profile_and_two_others_and_notes_their_use(self):
+    def test_each_picture_of_her_takes_three_of_her_pictures_profile_among_them_and_notes_their_use(self):
         folder = self.config.references_dir(self.her["id"])
         folder.mkdir(parents=True)
         for number in range(1, 7):
@@ -1160,8 +1160,11 @@ class ConversationTests(unittest.TestCase):
         first = {row["reference"] for row in self.store.picture_references}
         self.assertEqual(len(first), SociaConfig.PICTURE_REFERENCES)
         _, seen = self.run_turn([[{"content": "", "tool_calls": [call]}], [{"content": "here"}]], text="another selfie?")
-        self.assertEqual(len(seen["picture"]["references"]), 1 + SociaConfig.PICTURE_REFERENCES)
+        self.assertEqual(len(seen["picture"]["references"]), SociaConfig.PICTURE_REFERENCES)
         self.assertEqual(len(seen["picture"]["references"]), 3)
+        # Her profile picture is drawn like the others, and its uses are noted too.
+        everything = {"profile.png", *(path.name for path in self.config.references(self.her["id"]))}
+        self.assertLessEqual({row["reference"] for row in self.store.picture_references}, everything)
         second = [row["reference"] for row in self.store.picture_references[SociaConfig.PICTURE_REFERENCES:]]
         # Each use is noted, which raises that picture's score for the next draw (PoseTests).
         self.assertEqual(len(set(second)), SociaConfig.PICTURE_REFERENCES)
