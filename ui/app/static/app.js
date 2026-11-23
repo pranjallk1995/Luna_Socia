@@ -578,20 +578,51 @@ function picture(url) {
   image.src = url;
   image.alt = "Picture";
   image.loading = "lazy";
-  image.addEventListener("click", () => lightbox(url));
+  image.addEventListener("click", () => lightbox(url, picturesBeside(image)));
   return image;
 }
 
-function lightbox(url) {
-  const box = document.createElement("div");
-  box.className = "sc-lightbox";
-  box.append(Object.assign(document.createElement("img"), { src: url, alt: "Picture" }));
-  const save = Object.assign(document.createElement("a"), {
-    className: "sc-lightbox-save", href: `${url}?download=1`, textContent: "Download" });
+// A picture over everything, dialogs too (a modal dialog is on the top layer). With others beside it (her other
+// pictures, your photos, or the chat's pictures), ← and → or the arrow keys go through them. Esc or a click closes.
+function lightbox(url, urls = [url]) {
+  let at = Math.max(urls.indexOf(url), 0);
+  const box = element("dialog", { className: "sc-lightbox", autofocus: true });
+  const image = element("img", { alt: "Picture" });
+  const save = element("a", { className: "sc-lightbox-save", textContent: "Download" });
+  const count = element("span", { className: "sc-lightbox-count" });
+  const step = (by) => (event) => { event?.stopPropagation(); at = (at + by + urls.length) % urls.length; show(); };
+  const previous = element("button", { type: "button", className: "sc-lightbox-nav sc-lightbox-prev", textContent: "‹" });
+  const next = element("button", { type: "button", className: "sc-lightbox-nav sc-lightbox-next", textContent: "›" });
+  previous.setAttribute("aria-label", "Previous picture");
+  next.setAttribute("aria-label", "Next picture");
+  const show = () => {
+    image.src = urls[at];
+    save.href = `${urls[at]}${urls[at].includes("?") ? "&" : "?"}download=1`;
+    count.textContent = `${at + 1} / ${urls.length}`;
+  };
+  previous.addEventListener("click", step(-1));
+  next.addEventListener("click", step(1));
   save.addEventListener("click", (event) => event.stopPropagation());
-  box.append(save);
-  box.addEventListener("click", () => box.remove());
+  box.addEventListener("click", () => box.close());
+  box.addEventListener("keydown", (event) => {
+    if (urls.length < 2) return;
+    if (event.key === "ArrowLeft") { event.preventDefault(); step(-1)(); }
+    if (event.key === "ArrowRight") { event.preventDefault(); step(1)(); }
+  });
+  box.addEventListener("close", () => box.remove());
+  box.append(image, save);
+  if (urls.length > 1) box.append(previous, next, count);
+  show();
   document.body.append(box);
+  box.showModal();
+}
+
+// The pictures shown beside one: the others in its list of pictures, or the chat's pictures.
+function picturesBeside(image) {
+  const group = image.closest(".sc-references");
+  const found = group ? [...group.querySelectorAll("img")] : [...list.querySelectorAll("img.sc-picture")];
+  const urls = found.map((img) => img.getAttribute("src"));
+  return urls.includes(image.getAttribute("src")) ? urls : [image.getAttribute("src")];
 }
 
 // One message's element; hers can be filled in while she types.

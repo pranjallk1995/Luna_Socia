@@ -381,7 +381,14 @@ button, textarea, input, select { font: inherit; color: inherit; }
 .sc-about-facts dd { margin: 0; text-align: right; }
 
 /* The whole picture, however tall: it fits the screen above the Download button. */
-.sc-lightbox { position: fixed; inset: 0; display: grid; place-items: center; padding: 1rem 1rem 4.5rem; background: rgba(0, 0, 0, 0.9); cursor: zoom-out; z-index: 10; }
+.sc-lightbox { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; max-width: none; max-height: none; margin: 0; border: 0; display: grid; place-items: center; padding: 1rem 1rem 4.5rem; background: rgba(0, 0, 0, 0.92); color: var(--lv-text); cursor: zoom-out; }
+.sc-lightbox:not([open]) { display: none; }
+.sc-lightbox::backdrop { background: transparent; }
+.sc-lightbox-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 3rem; height: 3rem; border: 1px solid var(--lv-border); border-radius: 50%; background: rgba(17, 17, 17, 0.75); color: var(--lv-text); font-size: 1.8rem; line-height: 1; cursor: pointer; }
+.sc-lightbox-nav:hover { background: var(--lv-control-hover); }
+.sc-lightbox-prev { left: 1rem; }
+.sc-lightbox-next { right: 1rem; }
+.sc-lightbox-count { position: fixed; top: 1rem; left: 50%; transform: translateX(-50%); color: var(--lv-muted); font-size: var(--luna-text-small); font-variant-numeric: tabular-nums; }
 .sc-lightbox img {
   max-width: calc(100vw - 2rem); max-height: calc(100vh - 5.5rem); max-height: calc(100dvh - 5.5rem);
   object-fit: contain; border-radius: 0.5rem;
