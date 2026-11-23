@@ -14,7 +14,7 @@ import httpx
 from PIL import Image
 from starlette.testclient import TestClient
 
-from app.chat import (unanswered, written_picture, shown_part, ASKS_FOR_PICTURE, asks_for_picture, PICTURE_PROMISE, written_calls, written_reactions, written_remembers, clean_name, Conversation, model_messages, with_secret_nudge, without_written_pictures,
+from app.chat import (plain_description, unanswered, written_picture, shown_part, ASKS_FOR_PICTURE, asks_for_picture, PICTURE_PROMISE, written_calls, written_reactions, written_remembers, clean_name, Conversation, model_messages, with_secret_nudge, without_written_pictures,
                       written_notes, written_picture)
 from app.memory import ExportError, MemoryReader, fact_lines, facts_about_her, facts_about_them, parse_export, their_words
 from app.config import SociaConfig
@@ -432,21 +432,27 @@ class PromptTests(unittest.TestCase):
 
 
 class PoseTests(unittest.TestCase):
-    def test_used_lately_scores_low_and_likes_raise_it_a_little(self):
+    def test_drawn_at_random_the_ones_used_lately_less_often(self):
+        from collections import Counter
         from datetime import timedelta
         import random
         from app import poses
-        now = datetime(2026, 11, 22, tzinfo=timezone.utc)
+        now = datetime(2026, 11, 23, tzinfo=timezone.utc)
         fresh, hour_ago, week_ago = Path("fresh.jpg"), Path("hour.jpg"), Path("week.jpg")
         history = {"hour.jpg": {"uses": [now - timedelta(hours=1)], "likes": 0},
                    "week.jpg": {"uses": [now - timedelta(days=7)], "likes": 0}}
-        pictures = [hour_ago, week_ago, fresh]
-        self.assertEqual(poses.chosen(pictures, history, now, 3, random.Random(1)), [fresh, week_ago, hour_ago])
-        # Liked, the same use still scores lower than one never used, but higher than without the like.
-        self.assertGreater(poses.score([now - timedelta(days=1)], 2, now), poses.score([now - timedelta(days=1)], 0, now))
-        self.assertLess(poses.score([now - timedelta(days=1)], 5, now), poses.score([], 0, now))
-        # Used more often scores lower than used once at the same time.
-        self.assertLess(poses.score([now - timedelta(days=2)] * 3, 0, now), poses.score([now - timedelta(days=2)], 0, now))
+        rng = random.Random(1)
+        drawn = Counter(picture for _ in range(3000)
+                        for picture in poses.chosen([hour_ago, week_ago, fresh], history, now, 2, rng))
+        self.assertTrue(all(len(poses.chosen([hour_ago, week_ago, fresh], history, now, 2, rng)) == 2 for _ in range(5)))
+        self.assertGreater(drawn[fresh], drawn[week_ago])
+        self.assertGreater(drawn[week_ago], drawn[hour_ago])
+        self.assertGreater(drawn[hour_ago], 0)
+        # Each use raises the score, which wears off; likes raise the chance a little.
+        self.assertEqual(poses.score([], now), 0)
+        self.assertGreater(poses.score([now - timedelta(days=2)] * 3, now), poses.score([now - timedelta(days=2)], now))
+        self.assertGreater(poses.score([now - timedelta(hours=1)], now), poses.score([now - timedelta(days=7)], now))
+        self.assertGreater(poses.weight([now - timedelta(days=1)], 2, now), poses.weight([now - timedelta(days=1)], 0, now))
 
 
 class ImageServiceTests(unittest.TestCase):
@@ -618,6 +624,11 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(written_picture("[create_image: me on the couch]")["function"]["arguments"]["description"],
                          "me on the couch")
         self.assertEqual(shown_part(reply, 0), "Okay, let's do it. 😏\n")
+
+    def test_a_description_nested_in_itself_is_unwrapped(self):
+        self.assertEqual(plain_description("{'description': \"A cozy coffee date\", 'include_luna': True}"), "A cozy coffee date")
+        self.assertEqual(plain_description({"description": {"description": "Me at the beach"}}), "Me at the beach")
+        self.assertEqual(plain_description("  Me  on the couch "), "Me on the couch")
 
     def test_her_copy_of_a_reaction_note_is_taken_out(self):
         self.assertEqual(without_written_pictures('[Reacted 😘 to your message: "Another selfie…"]\nYou are adorable.'),
@@ -1100,7 +1111,7 @@ class ConversationTests(unittest.TestCase):
         self.assertIn("<image1>, <image2> and <image3> are pictures of the same woman", seen["picture"]["prompt"])
         self.assertEqual(self.config.references(self.her["id"]), [folder / "1-aaaaaaaa.jpg", folder / "2-bbbbbbbb.jpg"])
 
-    def test_her_pictures_least_used_lately_go_next(self):
+    def test_each_picture_of_her_takes_her_profile_and_two_others_and_notes_their_use(self):
         folder = self.config.references_dir(self.her["id"])
         folder.mkdir(parents=True)
         for number in range(1, 7):
@@ -1111,9 +1122,10 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(len(first), SociaConfig.PICTURE_REFERENCES)
         _, seen = self.run_turn([[{"content": "", "tool_calls": [call]}], [{"content": "here"}]], text="another selfie?")
         self.assertEqual(len(seen["picture"]["references"]), 1 + SociaConfig.PICTURE_REFERENCES)
+        self.assertEqual(len(seen["picture"]["references"]), 3)
         second = [row["reference"] for row in self.store.picture_references[SociaConfig.PICTURE_REFERENCES:]]
-        # The two never used go first, then two of the first picture's.
-        self.assertEqual(set(second) - first, {path.name for path in self.config.references(self.her["id"])} - first)
+        # Each use is noted, which raises that picture's score for the next draw (PoseTests).
+        self.assertEqual(len(set(second)), SociaConfig.PICTURE_REFERENCES)
 
     def test_an_edited_message_is_answered_again_and_what_came_after_goes(self):
         events, _ = self.run_turn([[{"content": "pizza it is"}]], text="pizza tonight?")

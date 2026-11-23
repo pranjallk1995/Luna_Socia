@@ -1675,7 +1675,7 @@ async function loadReferences(note) {
   }));
   $("references-add").hidden = references.length >= max;
   $("references-count").textContent = `${references.length} / ${max}`;
-  $("references-note").textContent = note || "Her face clear, in different poses. Each picture uses the ones used least lately; ones in pictures you ❤️ come back sooner.";
+  $("references-note").textContent = note || "Her face clear, in different poses. Each picture uses 2 at random, the ones used lately less often; ones in pictures you ❤️ come back sooner.";
 }
 
 // Photos of the owner's face, for face recognition in the photos they send her.
