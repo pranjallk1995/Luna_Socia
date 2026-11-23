@@ -34,6 +34,13 @@ PHOTO_MAX_SIDE = 2048
 WRITTEN_PICTURE = re.compile(
     r"\[\s*(?:you\s+)?(?:sends?|sent)?\s*(?:a\s+)?(?:picture|photo|selfie|image|pic)\s*:\s*([^\]]*)\]?",
     re.IGNORECASE)
+# The tool's own name in brackets, then the picture's description as a paragraph ("[create_image]\nA soft golden
+# light..." on 23 November), or inside them ("[create_image: ...]").
+WRITTEN_TOOL_PICTURE = re.compile(
+    r"\[\s*create[_ ]image\s*(?::\s*([^\]]*))?\]\s*((?:(?!\n[ \t]*\n).)*)", re.IGNORECASE | re.DOTALL)
+# The brackets her history puts before the owner's messages ("[Reacted 😘 to your message: ...]"), copied into
+# a reply of hers.
+COPIED_REACTION = re.compile(r"^[ \t]*\[Reacted [^\]\n]*\][ \t]*\n?", re.MULTILINE)
 # A note she wrote out (note("the moon")) instead of calling the tool: taken out and kept as one.
 # A reaction she wrote out ("react: ❤️" on a line of its own) instead of calling the tool.
 WRITTEN_REACTION = re.compile(r"^[ \t]*react(?:ion)?\s*[:(]\s*[\"']?([^\s\"')]+)[\"')]*[ \t]*$\n?", re.IGNORECASE | re.MULTILINE)
@@ -83,6 +90,18 @@ def asks_for_picture(text: str, seeing: bool = False) -> bool:
     photo, only the plain asks: a picture word there is about their photo."""
     words = OWNER_SENDS.sub(" ", text or "")
     return bool(ASKS_FOR_PICTURE.search(words) or (not seeing and ASKS_IN_TEXT.search(words)))
+
+
+def unanswered(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The owner's messages since her last reply with something in it: "selfie babe!", her reply that came out
+    empty, then "hey?" still asks for the selfie."""
+    waiting = []
+    for row in reversed(rows):
+        if row["role"] == "user":
+            waiting.append(row)
+        elif (row["content"] or "").strip() or row.get("image_id"):
+            break
+    return waiting[::-1]
 
 
 # How far back the photo a message asks about may be.
@@ -195,7 +214,7 @@ CHOSEN_APP = ("\n\nFor {name}'s last message, use {app}: your functions {functio
 # {"name": ..., "arguments": {...}}, with or without <tool_call> tags around it.
 WRITTEN_CALL = re.compile(r"(?:</?tool_call>\s*)*(\{\s*\"name\"\s*:\s*\"[^\"]+\"\s*,\s*\"arguments\"\s*:.*\})\s*(?:</?tool_call>)*",
                           re.DOTALL)
-CALL_MARKER = re.compile(r"</?tool_call>|\{\s*\"name\"\s*:|\bremember\s*\{", re.IGNORECASE)
+CALL_MARKER = re.compile(r"</?tool_call>|\{\s*\"name\"\s*:|\bremember\s*\{|\[\s*create[_ ]image", re.IGNORECASE)
 
 
 def written_calls(text: str) -> tuple[list[dict[str, Any]], str]:
@@ -304,8 +323,8 @@ def model_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def without_written_pictures(text: str) -> str:
     """Her text without any picture she wrote out in brackets, or note she wrote out."""
-    text = WRITTEN_NOTE.sub("", WRITTEN_PICTURE.sub("", text))
-    return "\n".join(line.rstrip() for line in text.splitlines()).strip()
+    text = WRITTEN_NOTE.sub("", WRITTEN_PICTURE.sub("", WRITTEN_TOOL_PICTURE.sub("", COPIED_REACTION.sub("", text))))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(line.rstrip() for line in text.splitlines())).strip()
 
 
 def written_reactions(text: str) -> tuple[list[dict[str, Any]], str]:
@@ -336,11 +355,13 @@ def written_notes(text: str) -> list[dict[str, Any]]:
 
 def written_picture(text: str) -> dict[str, Any] | None:
     """A create_image call for a picture she wrote out in brackets, if she did."""
+    tool = WRITTEN_TOOL_PICTURE.search(text)
     match = WRITTEN_PICTURE.search(text)
-    if not match or not match.group(1).strip():
+    description = " ".join(((tool.group(1) or tool.group(2)) if tool else match.group(1) if match else "").split())
+    if not description:
         return None
     return {"function": {"name": "create_image", "arguments": {
-        "description": match.group(1).strip(), "include_luna": True, "use_their_photo": False}}}
+        "description": description, "include_luna": True, "use_their_photo": False}}}
 
 
 def normalized_photo(data: bytes) -> bytes:
@@ -671,7 +692,7 @@ class Conversation:
         seeing = self.saw = sees_pictures(rows)
         # She gets the camera only when the owner's message asks for a picture: a picture takes the GPU for
         # minutes, and "imma send you two images" got one nobody asked for.
-        may_draw = asks_for_picture(rows[-1]["content"] or "", seeing) if rows and rows[-1]["role"] == "user" else False
+        may_draw = any(asks_for_picture(row["content"] or "", seeing) for row in unanswered(rows))
         if not may_draw:
             tools = [tool for tool in TOOLS if tool["function"]["name"] != "create_image"]
         if seeing:

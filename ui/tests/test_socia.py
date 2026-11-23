@@ -14,7 +14,7 @@ import httpx
 from PIL import Image
 from starlette.testclient import TestClient
 
-from app.chat import (ASKS_FOR_PICTURE, asks_for_picture, PICTURE_PROMISE, written_calls, written_reactions, written_remembers, clean_name, Conversation, model_messages, with_secret_nudge, without_written_pictures,
+from app.chat import (unanswered, written_picture, shown_part, ASKS_FOR_PICTURE, asks_for_picture, PICTURE_PROMISE, written_calls, written_reactions, written_remembers, clean_name, Conversation, model_messages, with_secret_nudge, without_written_pictures,
                       written_notes, written_picture)
 from app.memory import ExportError, MemoryReader, fact_lines, facts_about_her, facts_about_them, parse_export, their_words
 from app.config import SociaConfig
@@ -607,6 +607,27 @@ class ConversationTests(unittest.TestCase):
         events, seen = self.run_turn([[{"content": ""}], [{"thinking": "Hmm."}], [{"content": "Hi ❤️"}]], text="hey")
         self.assertEqual(["tools" in chat for chat in streamed(seen)], [True, True, False])
         self.assertEqual(events[-2]["message"]["content"], "Hi ❤️")
+
+    def test_a_picture_she_types_out_under_the_tools_name_is_taken(self):
+        # Her reply of 23 November, after "selfie babe!", an empty reply, and "hey?".
+        reply = ("Okay, let's do it. 😏\n[create_image]\nA soft golden light bathes the room as I lean against "
+                 "the couch,\nwearing a cream sweater.\n\n\"Smile, lover — or I'll make you.\" ☕")
+        self.assertEqual(written_picture(reply)["function"]["arguments"]["description"],
+                         "A soft golden light bathes the room as I lean against the couch, wearing a cream sweater.")
+        self.assertEqual(without_written_pictures(reply), "Okay, let's do it. 😏\n\n\"Smile, lover — or I'll make you.\" ☕")
+        self.assertEqual(written_picture("[create_image: me on the couch]")["function"]["arguments"]["description"],
+                         "me on the couch")
+        self.assertEqual(shown_part(reply, 0), "Okay, let's do it. 😏\n")
+
+    def test_her_copy_of_a_reaction_note_is_taken_out(self):
+        self.assertEqual(without_written_pictures('[Reacted 😘 to your message: "Another selfie…"]\nYou are adorable.'),
+                         "You are adorable.")
+
+    def test_a_request_she_has_not_answered_still_counts(self):
+        rows = [{"role": "luna", "content": "Hi"}, {"role": "user", "content": "selfie babe!"},
+                {"role": "luna", "content": ""}, {"role": "user", "content": "hey?"}]
+        self.assertEqual([row["content"] for row in unanswered(rows)], ["selfie babe!", "hey?"])
+        self.assertEqual(unanswered(rows[:2] + [{"role": "luna", "content": "Not now"}, rows[3]]), [rows[3]])
 
     def test_an_empty_reply_of_hers_is_left_out_of_the_history(self):
         rows = [{"role": "user", "content": "selfie babe!"}, {"role": "luna", "content": ""},
