@@ -89,12 +89,14 @@ ASKS_IN_TEXT = re.compile(r"\b(?:selfies?|pics?|pictures?|photos?|nudes?|snaps?)
 # A short go-ahead ("another one?", "yes please", "click!!"): asks for a picture only right after picture talk.
 FOLLOW_UP = re.compile(
     r"^\W*(?:\w+\W+){0,3}?(?:another|one more|again|more|yes+|yeah|yep|yup|sure|please|pls|ok(?:ay)?|go(?: ahead| on)?|"
-    r"do it|click|snap|shoot|take it|send it|now|haan|ha+|ji)\b[^.?!]{0,20}[.?!\s]*$", re.IGNORECASE)
+    r"do it|click|snap|shoot|take (?:it|one|another|the next)|send it|now|ready|cheese|capture|haan|ha+|ji)\b"
+    r"[^.?!]{0,20}[.?!\s]*$", re.IGNORECASE)
 # ...unless it says no: "no more", "not now", "enough", "later".
 NOT_NOW = re.compile(r"\b(?:no|nope|nah|not|don'?t|do not|stop|enough|later|wait)\b", re.IGNORECASE)
 # Her side of picture talk: a picture she sent, or her words about taking or sending one.
 PICTURE_TALK = re.compile(
-    r"\b(?:photos?|pics?|pictures?|selfies?|snaps?|shots?|click(?:ed|ing)?|camera|pose|smile for)\b|📸|📷",
+    r"\b(?:photos?|pics?|pictures?|selfies?|snaps?|snapp(?:ed|ing)|shots?|click(?:ed|ing)?|captur(?:e|ed|ing)|camera|"
+    r"pose|smile for|say cheese)\b|📸|📷",
     re.IGNORECASE)
 
 
@@ -838,8 +840,10 @@ class Conversation:
             logger.info("Dropped a picture she was not asked for")
             dropped, call = call, None
         if (call is None and may_draw and rows and not rows[-1].get("image_id")
-                and PICTURE_PROMISE.search(text)):
-            # She said a picture is coming but did not take it: ask what she meant to send, and take that.
+                and (PICTURE_PROMISE.search(text) or PICTURE_TALK.search(text))):
+            # She said a picture is coming but did not take it: ask what she meant to send, and take that. Any
+            # picture talk counts, once she was asked: "Clicked! Here's your photo!" (23 November) matched no
+            # promise phrase, and the check below answers NONE when her words send nothing.
             call = await self.promised_picture(companion["name"], name, rows, text)
         if call:
             arguments = call["function"].get("arguments") or {}
