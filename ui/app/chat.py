@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import base64
 import io
@@ -90,6 +91,23 @@ def asks_for_picture(text: str, seeing: bool = False) -> bool:
     photo, only the plain asks: a picture word there is about their photo."""
     words = OWNER_SENDS.sub(" ", text or "")
     return bool(ASKS_FOR_PICTURE.search(words) or (not seeing and ASKS_IN_TEXT.search(words)))
+
+
+def plain_description(value: Any) -> str:
+    """A picture's description as words: she sometimes nests the call's arguments inside it, as an object or as
+    its text ("{'description': \"A cozy coffee date...\"}" on 23 November)."""
+    for _ in range(3):
+        if isinstance(value, str) and value.strip().startswith("{"):
+            try:
+                value = ast.literal_eval(value.strip())
+            except (ValueError, SyntaxError):
+                try:
+                    value = json.loads(value)
+                except ValueError:
+                    break
+        if isinstance(value, dict):
+            value = value.get("description") or value.get("prompt") or ""
+    return " ".join(str(value or "").split())
 
 
 def unanswered(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -949,9 +967,9 @@ class Conversation:
             "description": answer, "include_luna": True, "use_their_photo": False}}}
 
     async def picture(self, companion_id: int, chat_id: int, arguments: dict[str, Any]) -> int:
-        description = str(arguments.get("description") or "").strip() or "a cosy selfie"
+        description = plain_description(arguments.get("description")) or "a cosy selfie"
         profile = self.config.profile_path(companion_id)
-        # Her profile picture first, then those of her other pictures used least lately; none without a profile picture.
+        # Her profile picture first, then 2 of her other pictures drawn at random, those used lately less likely; none without a profile picture.
         others: list[Path] = []
         with_her = bool(arguments.get("include_luna")) and profile.exists()
         if with_her:
