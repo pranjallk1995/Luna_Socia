@@ -125,11 +125,13 @@ play music, dim the lights or find a photo from the chat.
      like her for herself, and with it none. It then describes your photo once, and her later replies, from the chat model,
      read that description in brackets. Right after, Socia swaps the chat model back onto the
      GPU in the background, so your next message does not wait for it.
-3. When a picture fits (you ask for a selfie, or for her to step into your photo from this chat), she calls
-   her `create_image` tool. Socia sends Sentia's image service the prompt (`ui/app/images.py`) with her
-   profile picture, her other pictures and, if asked, your last photo as references. The service
-   unloads every Ollama model, reads the prompt in one process and draws in another, each giving
-   the GPU back when it exits; then the monitor loads her chat model back. About 1.5–2 minutes.
+3. When a picture fits (you ask for a selfie, a picture of the two of you, or for her to step into your
+   photo from this chat), she calls her `create_image` tool. Socia sends Sentia's image service the
+   prompt (`ui/app/images.py`) with 3 of her pictures as references and, if asked, one of your pictures
+   ("selfie together", "add me", "us": drawn like hers, from your picture and "Photos of you") or your
+   last photo. Her voice models leave the GPU for it. The service unloads every Ollama model, reads
+   the prompt in one process and draws in another, each giving the GPU back when it exits; then the
+   monitor loads her chat model back, and her voice returns. About 1.5–4 minutes.
 
 4. When you ask for something one of your Luna apps does, she uses it first: see below.
 
@@ -165,7 +167,9 @@ Your picture at the top right, on every page, opens what every girlfriend knows 
 
 - **Your picture** and **what she calls you** (your sign-in's first name until you choose one).
 - **About you:** your age, work, what you love; every girlfriend reads it before she replies.
-- **Photos of you:** up to 5, so she knows you in the photos you send, with your picture too.
+- **Photos of you:** up to 5, so she knows you in the photos you send, with your picture too. A
+  picture of the two of you takes one of them at random, the ones used lately less often; their
+  clothes and setting can carry over, so plain, well-lit photos of your face work best.
   Each must show a face; one face a photo, straight on and turned a little, works best.
 
 ### Her memory

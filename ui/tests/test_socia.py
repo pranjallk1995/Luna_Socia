@@ -1,6 +1,7 @@
 """Tests for Luna Socia: the gate, girlfriends and their memory, what she reads, her pictures, and full turns."""
 
 import asyncio
+import base64
 import dataclasses
 import io
 import json
@@ -15,7 +16,7 @@ import httpx
 from PIL import Image
 from starlette.testclient import TestClient
 
-from app.chat import (plain_description, unanswered, written_picture, shown_part, ASKS_FOR_PICTURE, asks_for_picture, PICTURE_PROMISE, written_calls, written_reactions, written_remembers, clean_name, Conversation, model_messages, with_secret_nudge, without_written_pictures,
+from app.chat import (TOGETHER, plain_description, unanswered, written_picture, shown_part, ASKS_FOR_PICTURE, asks_for_picture, PICTURE_PROMISE, written_calls, written_reactions, written_remembers, clean_name, Conversation, model_messages, with_secret_nudge, without_written_pictures,
                       written_notes, written_picture)
 from app.memory import ExportError, MemoryReader, fact_lines, facts_about_her, facts_about_them, parse_export, their_words
 from app.config import SociaConfig
@@ -418,6 +419,18 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(order, ["luna"])
         self.assertIn("<image1>", prompt)
         self.assertEqual(image_prompt("a red fox", 0, False), ("a red fox. Photorealistic.", []))
+
+    def test_a_picture_of_the_two_of_them_takes_one_of_their_pictures_last(self):
+        prompt, order = image_prompt("a selfie on the beach", luna_pictures=3, with_photo=False, with_them=True)
+        self.assertEqual(order, ["luna", "luna", "luna", "them"])
+        self.assertIn("two people together, the woman and the person in <image4>", prompt)
+        self.assertNotIn("alone", prompt)
+        # Into their own photo, they are already there.
+        self.assertEqual(image_prompt("on the bench", 1, True, True)[1], ["photo", "luna"])
+        for asked in ["selfie together?", "add me in the photo", "a pic of us", "you and me at the beach", "put me in it"]:
+            self.assertTrue(TOGETHER.search(asked), asked)
+        for asked in ["selfie babe!", "send me a pic", "show me your outfit"]:
+            self.assertFalse(TOGETHER.search(asked), asked)
 
     def test_several_pictures_of_her_are_one_woman(self):
         prompt, order = image_prompt("a mirror selfie", luna_pictures=3, with_photo=False)
@@ -1149,6 +1162,20 @@ class ConversationTests(unittest.TestCase):
         self.assertEqual(len(seen["picture"]["references"]), 3)
         self.assertIn("<image1>, <image2> and <image3> are pictures of the same woman", seen["picture"]["prompt"])
         self.assertEqual(self.config.references(self.her["id"]), [folder / "1-aaaaaaaa.jpg", folder / "2-bbbbbbbb.jpg"])
+
+    def test_a_selfie_together_sends_one_of_their_photos_too_and_notes_its_use(self):
+        self.config.owner_photos_dir.mkdir(parents=True)
+        (self.config.owner_photos_dir / "me-1.jpg").write_bytes(png("red"))
+        call = {"function": {"name": "create_image", "arguments": {"description": "us on the couch", "include_luna": True}}}
+        _, seen = self.run_turn([[{"content": "", "tool_calls": [call]}], [{"content": "cute"}]], text="selfie together?")
+        references = seen["picture"]["references"]
+        self.assertEqual(len(references), 2)
+        self.assertEqual(base64.b64decode(references[-1]), png("red"))
+        self.assertIn("two people together", seen["picture"]["prompt"])
+        self.assertIn("owner/me-1.jpg", [row["reference"] for row in self.store.picture_references])
+        # A selfie of her alone does not.
+        _, seen = self.run_turn([[{"content": "", "tool_calls": [call]}], [{"content": "cute"}]], text="selfie babe!")
+        self.assertEqual(len(seen["picture"]["references"]), 1)
 
     def test_each_picture_of_her_takes_three_of_her_pictures_profile_among_them_and_notes_their_use(self):
         folder = self.config.references_dir(self.her["id"])

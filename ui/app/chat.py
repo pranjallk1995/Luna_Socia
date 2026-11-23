@@ -121,6 +121,14 @@ def asks_for_picture(text: str, seeing: bool = False) -> bool:
     return bool(ASKS_FOR_PICTURE.search(words) or (not seeing and ASKS_IN_TEXT.search(words)))
 
 
+# The owner's words asking for the two of them in a picture: "selfie together", "add me in the photo", "us".
+TOGETHER = re.compile(
+    r"\b(?:together|us|both of us|the two of us|you and me|me and you|you and i|couple|with me|of me)\b|"
+    r"\b(?:add|put|include|insert|get|have)\s+me\b|\bme\s+(?:in|into|too|as well)\b", re.IGNORECASE)
+# How the owner's pictures are named in picture_references, beside hers.
+OWNER_REFERENCE = "owner/"
+
+
 def plain_description(value: Any) -> str:
     """A picture's description as words: she sometimes nests the call's arguments inside it, as an object or as
     its text ("{'description': \"A cozy coffee date...\"}" on 23 November)."""
@@ -1009,14 +1017,29 @@ class Conversation:
                                               list(SociaConfig.LIKED_REACTIONS))
             lunas = poses.chosen(pool, history, datetime.now(timezone.utc), SociaConfig.PICTURE_REFERENCES)
         photo = await asyncio.to_thread(self.store.last_photo, chat_id) if arguments.get("use_their_photo") else None
-        prompt, order = image_prompt(description, len(lunas), photo is not None)
-        pictures = {"luna": iter(lunas), "photo": iter([self.config.images_dir / photo["file"]] if photo else [])}
+        # The owner too, in a new picture of the two of them (in their own photo they are already): one of their
+        # pictures, drawn the same way.
+        them: list[Path] = []
+        if lunas and not photo and (arguments.get("include_them") or await self.asked_together(chat_id)):
+            history = await asyncio.to_thread(self.store.reference_history, companion_id,
+                                              list(SociaConfig.LIKED_REACTIONS))
+            theirs = {name.removeprefix(OWNER_REFERENCE): past for name, past in history.items()
+                      if name.startswith(OWNER_REFERENCE)}
+            them = poses.chosen(self.config.owner_faces(), theirs, datetime.now(timezone.utc), 1)
+        prompt, order = image_prompt(description, len(lunas), photo is not None, bool(them))
+        pictures = {"luna": iter(lunas), "them": iter(them),
+                    "photo": iter([self.config.images_dir / photo["file"]] if photo else [])}
         references = [next(pictures[name]).read_bytes() for name in order]
         # Sentia's image service empties the GPU of Ollama's models first, and leaves it empty after.
         image = await self.images.generate(prompt, references)
         file = await asyncio.to_thread(self.save_file, image, ".png")
         image_id = await asyncio.to_thread(self.store.add_image, chat_id, "generated", file, description)
-        if lunas:
+        if lunas or them:
             await asyncio.to_thread(self.store.add_picture_references, companion_id, image_id,
-                                    [path.name for path in lunas])
+                                    [path.name for path in lunas] + [OWNER_REFERENCE + path.name for path in them])
         return image_id
+
+    async def asked_together(self, chat_id: int) -> bool:
+        """Whether the owner's messages she has not answered ask for the two of them in a picture."""
+        rows = await asyncio.to_thread(self.store.recent, chat_id, SociaConfig.HISTORY_MESSAGES)
+        return any(TOGETHER.search(row["content"] or "") for row in unanswered(rows))

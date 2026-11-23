@@ -175,7 +175,8 @@ It shows something {name} wants you to see, and its "Faces:" says whose faces ar
 is never {name}: call it by the name {name} gave it, and if they ask who it is and you do not know, guess from what
 they told you earlier or ask.
 Pictures of yourself: when {name} asks for a selfie or a photo of you, or asks you to put yourself into a photo
-they sent, call create_image. Describe the scene in detail in English:
+they sent, call create_image. When they ask for the two of you (a selfie together, "add me", "us"), set
+include_them: their face comes from their photos. Describe the scene in detail in English:
 place, light, what you wear, your pose and expression, and the camera (selfie, mirror shot, candid).
 Send a short text along with it. Only then do you send pictures: a photo {name} sends gets a reply in words,
 never a picture back. A picture exists only when you call create_image: never say one is
@@ -197,8 +198,8 @@ TOOLS = [
         "function": {
             "name": "create_image",
             "description": (
-                "Take a picture to send: a selfie or photo of you, the other person's photo with you added "
-                "to it, or any other picture. Your face always comes from your profile picture."
+                "Take a picture to send: a selfie or photo of you, of the two of you together, the other "
+                "person's photo with you added to it, or any other picture. Your face comes from your pictures."
             ),
             "parameters": {
                 "type": "object",
@@ -214,6 +215,11 @@ TOOLS = [
                     "use_their_photo": {
                         "type": "boolean",
                         "description": "Edit the last photo they sent (for example to add you into it) instead of a new scene.",
+                    },
+                    "include_them": {
+                        "type": "boolean",
+                        "description": ("They are in the picture with you (a selfie together, the two of you): "
+                                        "their face comes from their photos."),
                     },
                 },
                 "required": ["description", "include_luna", "use_their_photo"],
@@ -329,6 +335,19 @@ def system_prompt(
     return prompt
 
 
+def together_prompt(description: str, luna_pictures: int) -> tuple[str, list[str]]:
+    """A picture of her with the owner: her pictures first, then theirs."""
+    lunas = image_names(list(range(1, luna_pictures + 1)))
+    them = f"<image{luna_pictures + 1}>"
+    her = (f"{lunas} are pictures of the same woman" if luna_pictures > 1 else f"{lunas} is a picture of a woman")
+    return (
+        f"A new photorealistic photo of two people together, the woman and the person in {them}: {description}. "
+        f"{her}; {them} is a picture of the person with her. Keep both faces and identities exactly as in their "
+        "pictures, each person once, but not their clothes, pose or background unless asked. Natural light.",
+        ["luna"] * luna_pictures + ["them"],
+    )
+
+
 def image_names(numbers: list[int]) -> str:
     """<image2>, <image3> and <image4>."""
     names = [f"<image{number}>" for number in numbers]
@@ -338,14 +357,16 @@ def image_names(numbers: list[int]) -> str:
 
 
 def image_prompt(
-    description: str, luna_pictures: int, with_photo: bool
+    description: str, luna_pictures: int, with_photo: bool, with_them: bool = False
 ) -> tuple[str, list[str]]:
     """Qwen-Image 2.1's instruction, and which images it refers to, in order.
 
-    The images are named "photo" (the last photo sent to Luna) and "luna" (her profile
-    picture first, then her other pictures); the instruction calls them <image1>, <image2>...
-    in the order returned. The first image is the canvas the output's size follows.
+    The images are named "photo" (the last photo sent to Luna), "luna" (pictures of her) and
+    "them" (one picture of the owner, for a picture of the two of them); the instruction calls
+    them <image1>, <image2>... in the order returned.
     """
+    if with_them and luna_pictures and not with_photo:
+        return together_prompt(description.strip().rstrip("."), luna_pictures)
     description = description.strip().rstrip(".")
     first_luna = 2 if with_photo else 1
     lunas = image_names(list(range(first_luna, first_luna + luna_pictures)))
