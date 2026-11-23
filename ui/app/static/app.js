@@ -1461,8 +1461,8 @@ async function loadProfile() {
   $("crop-open").hidden = !has;
   if (!has) $("crop").hidden = true;
   $("profile-note").textContent = has
-    ? "Her profile picture is her face in every picture she takes."
-    : `${her.name} has no profile picture yet. Add one: it becomes her face in every picture she takes.`;
+    ? "Her face in every picture she takes."
+    : "None yet. It becomes her face in every picture she takes.";
 }
 
 // An avatar's crop: the square's centre (x, y as fractions of the picture) and zoom (1 = the largest
@@ -1640,9 +1640,8 @@ async function loadReferences(note) {
     return item;
   }));
   $("references-add").hidden = references.length >= max;
-  $("references-note").textContent = note || (references.length
-    ? `${references.length} of ${max}. Use pictures where her face is clear, in different poses: each picture of her takes the ones used least lately, and those in pictures you ❤️ a little sooner.`
-    : "More pictures of her keep her face the same from other sides and vary her poses: each picture of her takes the ones used least lately.");
+  $("references-count").textContent = `${references.length} / ${max}`;
+  $("references-note").textContent = note || "Her face clear, in different poses. Each picture uses the ones used least lately; ones in pictures you ❤️ come back sooner.";
 }
 
 // Photos of the owner's face, for face recognition in the photos they send her.
@@ -1668,9 +1667,9 @@ async function loadOwnerPhotos(note) {
     return item;
   }));
   $("owner-photos-add").hidden = photos.length >= max;
-  $("owner-photos-note").textContent = note || (photos.length
-    ? `${photos.length} of ${max}. She knows your face in the photos you send.${photos.length < 3 ? " 3 or more, from different sides, work best." : ""}`
-    : "Photos of your face, so she knows you in the photos you send. Add 3 to 5, clear, from the front and a little to each side.");
+  $("owner-photos-note").textContent = note || (photos.length >= 3
+    ? `${photos.length} of ${max}. She knows your face in the photos you send.`
+    : "So she knows you in the photos you send: 3 to 5 clear ones, from the front and a little to each side.");
 }
 
 // You: your picture at the top right, the name she calls you, what you wrote about yourself, photos of you.
@@ -1690,7 +1689,7 @@ async function loadMe(note) {
   $("me-picture-remove").hidden = !me.has_picture;
   if (!me.has_picture) myCrop.close();
   $("me-crop-open").hidden = !me.has_picture || !$("me-crop").hidden;
-  $("me-picture-label").textContent = me.has_picture ? "Change your picture" : "Add your picture";
+  $("me-picture-label").textContent = me.has_picture ? "Change picture" : "Add your picture";
   $("me-name").value = me.name;
   $("me-name").placeholder = me.signed_in_as || "Your name";
   $("me-name").maxLength = me.limits.name;
@@ -1737,7 +1736,11 @@ async function loadStatus() {
   const reply = await fetch("/api/status").catch(() => null);
   if (!reply?.ok) return;
   const status = await reply.json();
-  $("model-note").textContent = `Chat: ${status.chat_model} · Pictures: ${status.images ? "ready" : "image model not running"}`;
+  // Every model she runs on: what it does for her, its name, and where it runs.
+  $("models").replaceChildren(...(status.models || []).map((model) => element("div", {},
+    element("dt", { textContent: model.role }),
+    element("dd", {}, element("span", { textContent: model.name }),
+      element("small", { className: model.ok === false ? "sc-off" : "", textContent: model.where })))));
 }
 
 function wire() {

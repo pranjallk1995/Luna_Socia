@@ -261,110 +261,166 @@
 </div>
 
 <dialog class="sc-dialog" id="menu">
-  <form method="dialog" class="sc-dialog-body">
-    <h2 id="menu-title">Luna</h2>
-    <img class="sc-profile-large" id="profile-large" alt="Her profile picture" hidden>
-    <p class="sc-muted" id="profile-note">Her profile picture is her face in every picture she takes.</p>
-    <button class="sc-button" type="button" id="crop-open" hidden>Adjust her avatar</button>
-    <div class="sc-crop" id="crop" hidden>
-      <div class="sc-crop-stage" id="crop-stage" tabindex="0" role="group"
-           aria-label="Her avatar's crop: drag, or use the arrow keys, to move her face into the circle">
-        <img id="crop-image" alt="" draggable="false">
-        <div class="sc-crop-ring" aria-hidden="true"></div>
-      </div>
-      <label class="sc-crop-zoom">
-        <span>Zoom</span>
-        <input type="range" id="crop-zoom" min="1" max="6" step="0.01" value="1">
-      </label>
-      <p class="sc-muted">Drag to move, scroll or slide to zoom. The circle is her avatar.</p>
-      <div class="sc-crop-actions">
-        <button class="sc-button" type="button" id="crop-reset">Default</button>
-        <button class="sc-button" type="button" id="crop-cancel">Cancel</button>
-        <button class="sc-button sc-crop-save" type="button" id="crop-save">Save</button>
-      </div>
-    </div>
-    <label class="sc-button">
-      <input type="file" id="profile-file" accept="image/*" hidden>
-      Change her profile picture
-    </label>
-    <h3>Other pictures of her</h3>
-    <ul class="sc-references" id="references"></ul>
-    <p class="sc-muted" id="references-note">More pictures of her keep her face the same from other sides. Each one makes a picture a little slower.</p>
-    <label class="sc-button" id="references-add">
-      <input type="file" id="references-file" accept="image/*" multiple hidden>
-      Add pictures of her
-    </label>
+  <form method="dialog" class="sc-dialog-body sc-settings">
+    <header class="sc-settings-head">
+      <h2 id="menu-title">Luna</h2>
+      <button class="sc-x" value="close" aria-label="Close" title="Close">×</button>
+    </header>
     <button class="sc-button" type="button" id="menu-edit">Edit her personality, voice and memory</button>
-    <div id="speaker-box" hidden>
-      <h3>Speaker</h3>
+
+    <section class="sc-group" aria-labelledby="profile-heading">
+      <h3 id="profile-heading">Profile picture</h3>
+      <div class="sc-profile-row">
+        <img class="sc-profile-large" id="profile-large" alt="Her profile picture" hidden>
+        <div class="sc-profile-actions">
+          <p class="sc-muted" id="profile-note">Her face in every picture she takes.</p>
+          <label class="sc-button sc-small">
+            <input type="file" id="profile-file" accept="image/*" hidden>
+            Change picture
+          </label>
+          <button class="sc-button sc-small" type="button" id="crop-open" hidden>Adjust avatar</button>
+        </div>
+      </div>
+      <div class="sc-crop" id="crop" hidden>
+        <div class="sc-crop-stage" id="crop-stage" tabindex="0" role="group"
+             aria-label="Her avatar's crop: drag, or use the arrow keys, to move her face into the circle">
+          <img id="crop-image" alt="" draggable="false">
+          <div class="sc-crop-ring" aria-hidden="true"></div>
+        </div>
+        <label class="sc-crop-zoom">
+          <span>Zoom</span>
+          <input type="range" id="crop-zoom" min="1" max="6" step="0.01" value="1">
+        </label>
+        <p class="sc-muted">Drag to move, scroll or slide to zoom. The circle is her avatar.</p>
+        <div class="sc-crop-actions">
+          <button class="sc-button" type="button" id="crop-reset">Default</button>
+          <button class="sc-button" type="button" id="crop-cancel">Cancel</button>
+          <button class="sc-button sc-crop-save" type="button" id="crop-save">Save</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="sc-group" aria-labelledby="references-heading">
+      <div class="sc-group-head">
+        <h3 id="references-heading">Other pictures of her</h3>
+        <span class="sc-count" id="references-count"></span>
+      </div>
+      <div class="sc-ref-grid">
+        <ul class="sc-references" id="references"></ul>
+        <label class="sc-ref-add" id="references-add" title="Add pictures of her">
+          <input type="file" id="references-file" accept="image/*" multiple hidden>
+          <b aria-hidden="true">+</b><span>Add</span>
+        </label>
+      </div>
+      <p class="sc-muted" id="references-note"></p>
+    </section>
+
+    <section class="sc-group" id="speaker-box" hidden aria-labelledby="speaker-heading">
+      <h3 id="speaker-heading">Speaker</h3>
       <label class="sc-choice">
         <span>Her voice plays on</span>
         <select id="speaker"></select>
       </label>
-      <button class="sc-button" type="button" id="speaker-find" hidden>Find speakers</button>
+      <button class="sc-button sc-small" type="button" id="speaker-find" hidden>Find speakers</button>
       <p class="sc-muted" id="speaker-note"></p>
-    </div>
-    <h3>Luna apps</h3>
-    <p class="sc-muted" id="apps-note">She can use your Luna apps for you once they are connected.</p>
-    <ul class="sc-luna-apps" id="apps-list"></ul>
-    <button class="sc-button" type="button" id="apps-menu-toggle">Connect Luna apps</button>
-    <p class="sc-muted" id="model-note"></p>
-    <button class="sc-button sc-danger" type="button" id="delete-chat">Delete this chat</button>
-    <a class="sc-button" href="/logout">Sign out</a>
-    <button class="sc-button" value="close">Close</button>
+    </section>
+
+    <section class="sc-group" aria-labelledby="apps-heading">
+      <h3 id="apps-heading">Luna apps</h3>
+      <p class="sc-muted" id="apps-note">She can use your Luna apps for you once they are connected.</p>
+      <ul class="sc-luna-apps" id="apps-list"></ul>
+      <button class="sc-button sc-small" type="button" id="apps-menu-toggle">Connect Luna apps</button>
+    </section>
+
+    <section class="sc-group" aria-labelledby="models-heading">
+      <h3 id="models-heading">Models</h3>
+      <dl class="sc-models" id="models"></dl>
+    </section>
+
+    <footer class="sc-settings-foot">
+      <button class="sc-button sc-small sc-danger" type="button" id="delete-chat">Delete this chat</button>
+      <a class="sc-button sc-small" href="/logout">Sign out</a>
+      <button class="sc-button sc-small" value="close">Close</button>
+    </footer>
     <p class="sc-muted sc-brand">__BRAND__</p>
   </form>
 </dialog>
 
 <!-- You: as every girlfriend knows you. -->
 <dialog class="sc-dialog" id="me">
-  <form method="dialog" class="sc-dialog-body">
-    <h2>You</h2>
-    <img class="sc-profile-large" id="me-picture" alt="Your profile picture" hidden>
-    <p class="sc-muted" id="me-picture-note">Your picture, at the top right. She also knows your face by it in the photos you send.</p>
-    <button class="sc-button" type="button" id="me-crop-open" hidden>Adjust your avatar</button>
-    <div class="sc-crop" id="me-crop" hidden>
-      <div class="sc-crop-stage" id="me-crop-stage" tabindex="0" role="group"
-           aria-label="Your avatar's crop: drag, or use the arrow keys, to move your face into the circle">
-        <img id="me-crop-image" alt="" draggable="false">
-        <div class="sc-crop-ring" aria-hidden="true"></div>
+  <form method="dialog" class="sc-dialog-body sc-settings">
+    <header class="sc-settings-head">
+      <h2>You</h2>
+      <button class="sc-x" value="close" aria-label="Close" title="Close">×</button>
+    </header>
+
+    <section class="sc-group" aria-labelledby="me-picture-heading">
+      <h3 id="me-picture-heading">Your picture</h3>
+      <div class="sc-profile-row">
+        <img class="sc-profile-large" id="me-picture" alt="Your profile picture" hidden>
+        <div class="sc-profile-actions">
+          <p class="sc-muted" id="me-picture-note">At the top right; she also knows your face by it.</p>
+          <label class="sc-button sc-small">
+            <input type="file" id="me-picture-file" accept="image/*" hidden>
+            <span id="me-picture-label">Add your picture</span>
+          </label>
+          <button class="sc-button sc-small" type="button" id="me-crop-open" hidden>Adjust avatar</button>
+          <button class="sc-button sc-small sc-danger" type="button" id="me-picture-remove" hidden>Remove</button>
+        </div>
       </div>
-      <label class="sc-crop-zoom">
-        <span>Zoom</span>
-        <input type="range" id="me-crop-zoom" min="1" max="6" step="0.01" value="1">
+      <div class="sc-crop" id="me-crop" hidden>
+        <div class="sc-crop-stage" id="me-crop-stage" tabindex="0" role="group"
+             aria-label="Your avatar's crop: drag, or use the arrow keys, to move your face into the circle">
+          <img id="me-crop-image" alt="" draggable="false">
+          <div class="sc-crop-ring" aria-hidden="true"></div>
+        </div>
+        <label class="sc-crop-zoom">
+          <span>Zoom</span>
+          <input type="range" id="me-crop-zoom" min="1" max="6" step="0.01" value="1">
+        </label>
+        <p class="sc-muted">Drag to move, scroll or slide to zoom. The circle is your avatar.</p>
+        <div class="sc-crop-actions">
+          <button class="sc-button" type="button" id="me-crop-reset">Default</button>
+          <button class="sc-button" type="button" id="me-crop-cancel">Cancel</button>
+          <button class="sc-button sc-crop-save" type="button" id="me-crop-save">Save</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="sc-group" aria-labelledby="me-about-heading">
+      <h3 id="me-about-heading">About you</h3>
+      <label class="sc-field">
+        <span>What she calls you</span>
+        <input id="me-name" autocomplete="nickname">
       </label>
-      <p class="sc-muted">Drag to move, scroll or slide to zoom. The circle is your avatar.</p>
-      <div class="sc-crop-actions">
-        <button class="sc-button" type="button" id="me-crop-reset">Default</button>
-        <button class="sc-button" type="button" id="me-crop-cancel">Cancel</button>
-        <button class="sc-button sc-crop-save" type="button" id="me-crop-save">Save</button>
+      <label class="sc-field">
+        <span>About you · every girlfriend reads this before she replies</span>
+        <textarea data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" id="me-about" rows="5" placeholder="Your age, your work, where you live, what you love, how you like to be treated…"></textarea>
+      </label>
+      <div class="sc-save-row">
+        <p class="sc-muted" id="me-note" role="status"></p>
+        <button class="sc-button sc-small sc-primary" type="button" id="me-save">Save</button>
       </div>
-    </div>
-    <label class="sc-button">
-      <input type="file" id="me-picture-file" accept="image/*" hidden>
-      <span id="me-picture-label">Add your picture</span>
-    </label>
-    <button class="sc-button sc-danger" type="button" id="me-picture-remove" hidden>Remove your picture</button>
-    <h3>About you</h3>
-    <label class="sc-field">
-      <span>What she calls you</span>
-      <input id="me-name" autocomplete="nickname">
-    </label>
-    <label class="sc-field">
-      <span>About you <em>(every girlfriend reads this before she replies)</em></span>
-      <textarea data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false" id="me-about" rows="5" placeholder="Your age, your work, where you live, what you love, how you like to be treated…"></textarea>
-    </label>
-    <button class="sc-button" type="button" id="me-save">Save</button>
-    <p class="sc-muted" id="me-note" role="status"></p>
-    <h3>Photos of you</h3>
-    <ul class="sc-references" id="owner-photos"></ul>
-    <p class="sc-muted" id="owner-photos-note">Photos of your face, so she knows you in the photos you send. Add 3 to 5, clear, from the front and a little to each side.</p>
-    <label class="sc-button" id="owner-photos-add">
-      <input type="file" id="owner-photos-file" accept="image/*" multiple hidden>
-      Add photos of you
-    </label>
-    <a class="sc-button" href="/logout">Sign out</a>
-    <button class="sc-button" value="close">Close</button>
+    </section>
+
+    <section class="sc-group" aria-labelledby="owner-photos-heading">
+      <div class="sc-group-head">
+        <h3 id="owner-photos-heading">Photos of you</h3>
+      </div>
+      <div class="sc-ref-grid">
+        <ul class="sc-references" id="owner-photos"></ul>
+        <label class="sc-ref-add" id="owner-photos-add" title="Add photos of you">
+          <input type="file" id="owner-photos-file" accept="image/*" multiple hidden>
+          <b aria-hidden="true">+</b><span>Add</span>
+        </label>
+      </div>
+      <p class="sc-muted" id="owner-photos-note">So she knows you in the photos you send: 3 to 5 clear ones, from the front and a little to each side.</p>
+    </section>
+
+    <footer class="sc-settings-foot">
+      <a class="sc-button sc-small" href="/logout">Sign out</a>
+      <button class="sc-button sc-small" value="close">Close</button>
+    </footer>
   </form>
 </dialog>
 </body>

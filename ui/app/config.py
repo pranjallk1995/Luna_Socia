@@ -29,7 +29,7 @@ class SociaConfig:
     # More pictures of Luna besides her profile picture: they keep her face the same at other angles. Each
     # picture of her takes her profile picture and the PICTURE_REFERENCES of these used least lately (app/poses.py),
     # so her poses vary; each one sent makes a picture slower and needs more GPU memory.
-    MAX_REFERENCES: ClassVar[int] = 10
+    MAX_REFERENCES: ClassVar[int] = 6
     PICTURE_REFERENCES: ClassVar[int] = 4
     # The owner's reactions on a picture of her that count as liking it, and how much each like raises the
     # score of the pictures it used (times ln(1 + likes)); being used lowers a score by about 1.5 just after.

@@ -759,7 +759,19 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         user = await owner(request)
         if isinstance(user, Response):
             return user
-        return JSONResponse({"chat_model": config.chat_model, "images": await images.available(),
+        pictures = await images.available()
+        voice_where = "GPU" if config.voice_device == "cuda" else "CPU"
+        models = [
+            {"role": "Chat", "name": config.chat_model, "where": "Her replies · Ollama, on the GPU"},
+            {"role": "Photos", "name": config.vision_model, "where": "Sees your photos and answers about them · Ollama"},
+            {"role": "Memory", "name": config.embed_model, "where": "Finds what she remembers about a message · Ollama"},
+            {"role": "Pictures", "name": "Qwen-Image 2.1 Turbo",
+             "where": "Her pictures · Sentia's image service" + ("" if pictures else " · not running"), "ok": pictures},
+            {"role": "Voice", "name": "Kokoro 82M", "where": f"Reads her replies aloud · {voice_where}"},
+            {"role": "Hearing", "name": f"Whisper {config.stt_model}", "where": f"Your voice messages to text · {voice_where}"},
+            {"role": "Faces", "name": "InsightFace buffalo_l", "where": "Whose faces are in a photo · with the photo model"},
+        ]
+        return JSONResponse({"chat_model": config.chat_model, "images": pictures, "models": models,
                              "brand": SociaConfig.BRAND})
 
     async def models(request: Request) -> Response:
