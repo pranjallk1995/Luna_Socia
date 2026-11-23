@@ -468,9 +468,9 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         profile = config.profile_path(row["id"])
         data = chosen.read_bytes()
         if profile.exists():
-            chosen.write_bytes(profile.read_bytes())
-        else:
-            chosen.unlink()
+            # A new name: a picture's address is cached for good, so the old profile picture must not reuse this one's.
+            (config.references_dir(row["id"]) / f"{time.time_ns()}-{uuid.uuid4().hex[:8]}.jpg").write_bytes(profile.read_bytes())
+        chosen.unlink()
         profile.write_bytes(data)
         await new_profile(row, profile)
         return JSONResponse({"saved": True})
@@ -675,6 +675,26 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
             return JSONResponse({"deleted": True})
         return FileResponse(path, headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
+    async def owner_photo_to_picture(request: Request) -> Response:
+        """One of the owner's photos becomes their picture; their old picture becomes a photo in its place."""
+        user = await owner(request)
+        if isinstance(user, Response):
+            return user
+        name = request.path_params["name"]
+        chosen = config.owner_photos_dir / name
+        if not REFERENCE_NAME.fullmatch(name) or not chosen.exists():
+            return JSONResponse({"error": "no such photo"}, 404)
+        picture = config.owner_picture_path
+        data = chosen.read_bytes()
+        if picture.exists():
+            # A new name: a photo's address is cached for good, so the old picture must not reuse this one's.
+            (config.owner_photos_dir / f"{time.time_ns()}-{uuid.uuid4().hex[:8]}.jpg").write_bytes(picture.read_bytes())
+        chosen.unlink()
+        picture.parent.mkdir(parents=True, exist_ok=True)
+        picture.write_bytes(data)
+        Avatar(picture).reset()
+        return JSONResponse({"saved": True})
+
     async def memory(request: Request) -> Response:
         """What she remembers (GET), or the owner's edit of it (PUT {memory})."""
         row = await her(request)
@@ -859,6 +879,7 @@ def create_app(config: SociaConfig, store: SociaStore, conversation: Conversatio
         Route("/api/owner/avatar/crop", my_avatar_crop, methods=["GET", "PUT", "DELETE"]),
         Route("/api/owner/photos", owner_photos, methods=["GET", "POST"]),
         Route("/api/owner/photos/{name}", owner_photo, methods=["GET", "DELETE"]),
+        Route("/api/owner/photos/{name}/profile", owner_photo_to_picture, methods=["POST"]),
         Route("/api/voices/{voice}/sample", voice_sample),
         Route("/api/chats/{chat_id:int}", chat, methods=["GET", "PATCH", "DELETE"]),
         Route("/api/chats/{chat_id:int}/messages", messages),

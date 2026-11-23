@@ -1400,7 +1400,7 @@ function wireSpeakers() {
     }
     drawSpeakers();
   });
-  navigator.mediaDevices.addEventListener?.("devicechange", () => { if ($("menu").open) drawSpeakers(); });
+  navigator.mediaDevices.addEventListener?.("devicechange", () => { if ($("me").open) drawSpeakers(); });
 }
 
 async function toggleRecording() {
@@ -1694,10 +1694,25 @@ async function loadOwnerPhotos(note) {
       await fetch(photo.url, { method: "DELETE" });
       loadOwnerPhotos();
     });
-    item.append(image, remove);
+    const promote = document.createElement("button");
+    promote.type = "button";
+    promote.className = "sc-promote";
+    promote.textContent = "★";
+    promote.title = "Make this your picture";
+    promote.setAttribute("aria-label", "Make this your picture");
+    promote.addEventListener("click", async () => {
+      if (!confirm("Make this your picture? Your current one becomes one of these photos.")) return;
+      const reply = await fetch(`${photo.url}/profile`, { method: "POST" }).catch(() => null);
+      $("me-picture-note").textContent = reply?.ok ? "Your picture is changed." : "That did not work.";
+      if (!reply?.ok) return;
+      loadMe();
+      loadOwnerPhotos();
+    });
+    item.append(image, promote, remove);
     return item;
   }));
   $("owner-photos-add").hidden = photos.length >= max;
+  $("owner-photos-count").textContent = `${photos.length} / ${max}`;
   $("owner-photos-note").textContent = note || (photos.length >= 3
     ? `${photos.length} of ${max}. She knows your face in the photos you send.`
     : "So she knows you in the photos you send: 3 to 5 clear ones, from the front and a little to each side.");
@@ -1735,6 +1750,10 @@ function wireMe() {
     $("me-note").textContent = "";
     loadMe();
     loadOwnerPhotos();
+    // The settings for the whole app are yours: the speaker, your Luna apps, and the models.
+    loadStatus();
+    showApps();
+    drawSpeakers();
     dialog.showModal();
   }));
   $("me-save").addEventListener("click", async () => {
@@ -1815,7 +1834,7 @@ function wire() {
   });
 
   const menu = $("menu");
-  const openMenu = () => { loadStatus(); loadReferences(); showApps(); drawSpeakers(); menu.showModal(); };
+  const openMenu = () => { loadReferences(); menu.showModal(); };
   wireSpeakers();
   $("owner-photos-file").addEventListener("change", async () => {
     const files = [...$("owner-photos-file").files];
@@ -1839,7 +1858,6 @@ function wire() {
     $("references-file").value = "";
     loadReferences(reply.ok ? "" : answer.error || "Those pictures could not be saved.");
   });
-  $("menu-open").addEventListener("click", openMenu);
   $("profile-open").addEventListener("click", openMenu);
   $("about-settings").addEventListener("click", openMenu);
   $("about-photo").addEventListener("click", () => lightbox($("about-photo").src));

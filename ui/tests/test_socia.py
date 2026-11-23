@@ -1229,8 +1229,18 @@ class GateTests(unittest.TestCase):
             self.assertEqual(client.get("/api/owner/photos/..%2F..%2Fprofile.png").status_code, 404)
             too_many = [("photos", (f"{n}.png", png("red"), "image/png")) for n in range(SociaConfig.MAX_OWNER_PHOTOS)]
             self.assertEqual(client.post("/api/owner/photos", files=too_many).status_code, 400)
-            self.assertEqual(client.delete(url).json(), {"deleted": True})
+            # A photo becomes their picture; with no picture before, the photo just moves.
+            self.assertEqual(client.post(f"{url}/profile").json(), {"saved": True})
             self.assertEqual(client.get("/api/owner/photos").json()["photos"], [])
+            self.assertEqual(client.get("/api/owner/picture").status_code, 200)
+            # With one, the old picture takes a new name among the photos.
+            url = client.post("/api/owner/photos", files=[("photos", ("c.png", png("red"), "image/png"))]).json()["photos"][0]["url"]
+            client.post(f"{url}/profile")
+            photos = client.get("/api/owner/photos").json()["photos"]
+            self.assertEqual(len(photos), 1)
+            self.assertNotEqual(photos[0]["url"], url)
+            self.assertEqual(client.post(f"{url}/profile").status_code, 404)
+            self.assertEqual(client.delete(photos[0]["url"]).json(), {"deleted": True})
         self.assertEqual(self.client(None).get("/api/owner/photos").status_code, 401)
 
     def test_the_owner_has_a_picture_a_name_she_calls_them_and_details(self):
@@ -1288,8 +1298,11 @@ class GateTests(unittest.TestCase):
             picture = chosen.read_bytes()
             self.assertEqual(client.post(f"{left['url']}/profile").json(), {"saved": True})
             self.assertEqual(profile.read_bytes(), picture)
-            self.assertEqual(chosen.read_bytes(), b"old profile")
-            self.assertEqual(len(client.get(base).json()["references"]), 1)
+            # Her old profile picture takes a new name, since a picture's address is cached for good.
+            self.assertFalse(chosen.exists())
+            references = client.get(base).json()["references"]
+            self.assertEqual(len(references), 1)
+            self.assertEqual((settings.references_dir(her["id"]) / references[0]["name"]).read_bytes(), b"old profile")
             # A new face: nude pictures wait for the owner's confirmation again.
             self.assertEqual(self.store.companion(her["id"])["persona"]["nude_pictures"], "off")
             self.assertEqual(client.post(f"{base}/..%2Fprofile.png/profile").status_code, 404)

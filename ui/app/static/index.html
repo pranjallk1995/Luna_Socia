@@ -198,10 +198,6 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg>
           <span class="sc-visually-hidden">Read replies aloud</span>
         </button>
-        <button class="sc-icon" type="button" id="menu-open" title="Settings" aria-haspopup="dialog">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-          <span class="sc-visually-hidden">Settings</span>
-        </button>
         <button class="sc-me" type="button" data-me title="You: your picture and details">
           <img alt="" hidden><span class="sc-me-initial" aria-hidden="true"></span>
           <span class="sc-visually-hidden">You</span>
@@ -315,31 +311,11 @@
       <p class="sc-muted" id="references-note"></p>
     </section>
 
-    <section class="sc-group" id="speaker-box" hidden aria-labelledby="speaker-heading">
-      <h3 id="speaker-heading">Speaker</h3>
-      <label class="sc-choice">
-        <span>Her voice plays on</span>
-        <select id="speaker"></select>
-      </label>
-      <button class="sc-button sc-small" type="button" id="speaker-find" hidden>Find speakers</button>
-      <p class="sc-muted" id="speaker-note"></p>
-    </section>
 
-    <section class="sc-group" aria-labelledby="apps-heading">
-      <h3 id="apps-heading">Luna apps</h3>
-      <p class="sc-muted" id="apps-note">She can use your Luna apps for you once they are connected.</p>
-      <ul class="sc-luna-apps" id="apps-list"></ul>
-      <button class="sc-button sc-small" type="button" id="apps-menu-toggle">Connect Luna apps</button>
-    </section>
 
-    <section class="sc-group" aria-labelledby="models-heading">
-      <h3 id="models-heading">Models</h3>
-      <dl class="sc-models" id="models"></dl>
-    </section>
 
     <footer class="sc-settings-foot">
       <button class="sc-button sc-small sc-danger" type="button" id="delete-chat">Delete this chat</button>
-      <a class="sc-button sc-small" href="/logout">Sign out</a>
       <button class="sc-button sc-small" value="close">Close</button>
     </footer>
     <p class="sc-muted sc-brand">__BRAND__</p>
@@ -406,6 +382,7 @@
     <section class="sc-group" aria-labelledby="owner-photos-heading">
       <div class="sc-group-head">
         <h3 id="owner-photos-heading">Photos of you</h3>
+        <span class="sc-count" id="owner-photos-count"></span>
       </div>
       <div class="sc-ref-grid">
         <ul class="sc-references" id="owner-photos"></ul>
@@ -415,6 +392,29 @@
         </label>
       </div>
       <p class="sc-muted" id="owner-photos-note">So she knows you in the photos you send: 3 to 5 clear ones, from the front and a little to each side.</p>
+    </section>
+
+
+    <section class="sc-group" id="speaker-box" hidden aria-labelledby="speaker-heading">
+      <h3 id="speaker-heading">Speaker</h3>
+      <label class="sc-choice">
+        <span>Her voice plays on</span>
+        <select id="speaker"></select>
+      </label>
+      <button class="sc-button sc-small" type="button" id="speaker-find" hidden>Find speakers</button>
+      <p class="sc-muted" id="speaker-note"></p>
+    </section>
+
+    <section class="sc-group" aria-labelledby="apps-heading">
+      <h3 id="apps-heading">Luna apps</h3>
+      <p class="sc-muted" id="apps-note">She can use your Luna apps for you once they are connected.</p>
+      <ul class="sc-luna-apps" id="apps-list"></ul>
+      <button class="sc-button sc-small" type="button" id="apps-menu-toggle">Connect Luna apps</button>
+    </section>
+
+    <section class="sc-group" aria-labelledby="models-heading">
+      <h3 id="models-heading">Models</h3>
+      <dl class="sc-models" id="models"></dl>
     </section>
 
     <footer class="sc-settings-foot">
