@@ -290,6 +290,13 @@ girlfriend, or create one. To run your local code instead, use
 `./Luna_Sentia/luna.sh start --build socia`. Every option of `luna.sh` is in
 [Start everything](https://github.com/pranjallk1995/Luna_Sentia#start-everything).
 
+<p align="center">
+  <a href="https://github.com/pranjallk1995/Luna_Sentia/blob/main/assets/luna-sh-demo.mp4"><img src="https://raw.githubusercontent.com/pranjallk1995/Luna_Sentia/main/assets/luna-sh-demo.webp" alt="A terminal running luna.sh: starting Sentia and every app, showing one app's containers, stopping and starting Lumia alone, listing every app's containers, then watching Lumia while a saved file syncs and restarts its UI" width="900"></a>
+</p>
+
+<p align="center"><em>Start everything, check one app, stop and start it alone, list every app, then
+develop with <code>--watch</code>. Select it for the sharper video.</em></p>
+
 ## Releases
 
 Each release is on the [Releases page](https://github.com/pranjallk1995/Luna_Socia/releases), with what changed and how to
