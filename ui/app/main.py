@@ -68,7 +68,7 @@ def main() -> None:
         # Her memory read by topic, with the same embedding model.
         recall = Recall(store, rememberer.embedder, ollama.complete)
     conversation = Conversation(config, store, ollama, images, apps, faces, rememberer, recall)
-    reader = MemoryReader(store, ollama, conversation.turn, config.read_chats)
+    reader = MemoryReader(store, ollama, conversation.turn, config.read_chats, rememberer)
     voice = Voice(config)
     # Off the GPU while a picture is drawn, and back after.
     images.gpu_sharers.append(voice)

@@ -956,6 +956,13 @@ class Conversation:
         if not task.cancelled() and task.exception() is not None:
             logger.error("Her memory's upkeep failed", exc_info=task.exception())
 
+    async def is_new(self, companion_id: int, who: str, fact: str) -> bool:
+        """Whether a fact she chose to remember says something she does not have yet, by meaning (app/remembering.py)."""
+        if self.rememberer is None:
+            return True
+        companion = await asyncio.to_thread(self.store.companion, companion_id)
+        return companion is not None and bool(await self.rememberer.new_facts(companion, who, [fact]))
+
     async def remember(self, companion_id: int, calls: list[dict[str, Any]]) -> list[dict[str, str]]:
         """The facts she chose to remember, added to her memory for every chat; the ones that are new, each with
         whom it is about ("them": her memory of you, "me": her bio)."""
@@ -972,10 +979,14 @@ class Conversation:
             fact = " ".join(str(arguments.get("fact") or arguments.get("text") or "").split())[:SociaConfig.NOTE_CHARS]
             if not fact:
                 continue
-            if str(arguments.get("about") or "").lower() == "me":
+            about_her = str(arguments.get("about") or "").lower() == "me"
+            if about_her:
                 # About herself: into her bio (which is about "she"), so she says the same next time.
                 fact = re.sub(r"^(?:I'm|I am)\b", "She is", fact)
                 fact = re.sub(r"^My\b", "Her", re.sub(r"^I\b", "She", fact))
+            if not await self.is_new(companion_id, "her" if about_her else "you", fact):
+                continue
+            if about_her:
                 if await asyncio.to_thread(self.store.add_to_bio, companion_id, [fact], SociaConfig.ABOUT_CHARS):
                     remembered.append({"about": "me", "fact": fact})
             elif await asyncio.to_thread(self.store.remember, companion_id, fact, SociaConfig.MEMORY_CHARS):

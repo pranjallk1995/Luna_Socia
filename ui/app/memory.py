@@ -302,8 +302,10 @@ class MemoryReader:
     MERGE_BATCH_CHARS = 14000
     MEMORY_LINES = 45
 
-    def __init__(self, store, ollama, turn: asyncio.Lock, read_chats: bool = True) -> None:
+    def __init__(self, store, ollama, turn: asyncio.Lock, read_chats: bool = True, rememberer=None) -> None:
         self.store = store
+        # Compares new facts with what she has by meaning (app/remembering.py); None keeps the word checks only.
+        self.rememberer = rememberer
         self.read_chats = read_chats
         self.ollama = ollama
         self.turn = turn
@@ -391,6 +393,8 @@ class MemoryReader:
             return []
         bio = str((her.get("persona") or {}).get("about") or "").strip()
         facts = await facts_about_her(self.ask, her["name"], bio, source["messages"])
+        if self.rememberer is not None:
+            facts = await self.rememberer.new_facts(her, "her", facts)
         added = await asyncio.to_thread(self.store.add_to_bio, her["id"], facts, SociaConfig.ABOUT_CHARS)
         if added:
             logger.info("Added %d facts she told about herself to her bio", len(added))
@@ -403,10 +407,23 @@ class MemoryReader:
         if companion is None or not rows:
             return
         lines, seen = [], set()
-        for line in "\n".join([companion["memory"], *(row["facts"] for row in rows)]).splitlines():
+        for line in (companion["memory"] or "").splitlines():
             if line.strip() and line.strip().casefold() not in seen:
                 seen.add(line.strip().casefold())
                 lines.append(line.strip())
+        read = []
+        for line in "\n".join(row["facts"] for row in rows).splitlines():
+            if line.strip() and line.strip().casefold() not in seen:
+                seen.add(line.strip().casefold())
+                read.append(line.strip())
+        if self.rememberer is not None:
+            # A fact she has in other words is not merged in again (her chat model would only fold it back).
+            read = await self.rememberer.new_facts(companion, "you", read)
+        if not read:
+            # Nothing she did not know: her memory stays as it is, and the chats count as merged.
+            await asyncio.to_thread(self.store.merge_memory, companion_id, companion["memory"] or "", [row["id"] for row in rows])
+            return
+        lines += read
         notes = "\n".join(lines)
         memory = await self.condense(notes)
         await asyncio.to_thread(self.store.merge_memory, companion_id, memory, [row["id"] for row in rows])

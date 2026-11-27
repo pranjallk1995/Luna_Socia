@@ -190,8 +190,20 @@ on): on real chats it still took what photos showed for facts about you.
 message and her reply, each with the line before it, through a small embedding model (Ollama's
 `qwen3-embedding:0.6b`, the one Lexia's search uses). Two neurons
 decide whether your message holds a lasting fact about you, or her reply something new about
-herself. Only then does her chat model write the fact, as one short line from those words. The
-embedding model compares it with what she already has, so a fact she knows isn't saved twice.
+herself. Only then does her chat model write the fact, as one short line from those words.
+
+**A fact she knows isn't saved twice, however it is worded.** Every way she remembers goes through
+the same check: what she learns by herself, what her `remember` tool saves, and what she reads from
+her quiet chats and imported conversations, into her memory or her bio.
+- **Near copies:** the embedding model compares the fact with each line she has (and with the facts
+  learnt beside it); a near copy (cosine 0.95 or more) is skipped at once.
+- **Close, but maybe not the same:** for lines merely close to it (0.65 or more, the closest three),
+  her chat model is asked whether they state the same fact. "Their cat is called Mini" and "Their job
+  is nursing" are skipped beside "They have a cat named Mini" and "They work as a nurse", while "They
+  have a dog named Mini" and "Their favourite food is biryani" are kept beside the cat and pizza.
+  Closeness alone would get both kinds wrong.
+- **When a model is away:** without the chat model, closeness of 0.8 decides; without the embedding
+  model, the fact is kept rather than lost.
 - **Where it goes:** a fact about you goes into what she remembers, and one about herself into her
   bio.
 - **What you see:** "Remembered:" under her reply.

@@ -95,6 +95,45 @@ class RemembererTests(unittest.TestCase):
         self.assertEqual(self.turn(rememberer, "", "pizza is my favourite", "Yum!"), [])
         self.assertEqual(self.store.companion(self.her["id"])["memory"], "- Their favourite food is pizza")
 
+    def test_facts_are_compared_by_meaning_with_what_she_has_and_each_other(self):
+        self.store.update_companion(self.her["id"], {"memory": "- They have a cat named Mini"})
+
+        def judge(prompt):
+            # Her chat model: the same fact in other words is the same; a dog is not a cat.
+            return "YES" if "A: They have a cat named Mini." in prompt else "NO"
+
+        rememberer = self.rememberer(judge)
+        her = self.store.companion(self.her["id"])
+        kept = asyncio.run(rememberer.new_facts(her, "you", [
+            "- They have a cat named Mini.", "They have a dog named Mini", "They work as a nurse",
+            "they work as a nurse", "They love rain",
+        ]))
+        self.assertEqual(kept, ["They have a dog named Mini", "They work as a nurse", "They love rain"])
+        asked = [prompt for prompt in self.prompts if prompt.startswith("Do these two lines")]
+        self.assertTrue(any("A: They have a dog named Mini" in prompt for prompt in asked))
+        self.assertFalse(any("A: they work as a nurse" in prompt for prompt in asked))  # a near copy needs no asking
+        self.assertEqual(asyncio.run(rememberer.new_facts(her, "her", ["She is 25, from Mumbai.", "She paints"])), ["She paints"])
+
+    def test_without_her_chat_model_closeness_alone_decides(self):
+        self.store.update_companion(self.her["id"], {"memory": "- They have a cat named Mini"})
+        rememberer = Rememberer(self.config, self.store, None, FakeEmbedder())
+        her = self.store.companion(self.her["id"])
+        self.assertEqual(asyncio.run(rememberer.new_facts(her, "you", ["They have a cat named Mini.", "They love rain"])),
+                         ["They love rain"])
+
+    def test_an_unreachable_embedding_model_keeps_the_facts(self):
+        class Down:
+            model = "qwen3-embedding:0.6b"
+
+            def vectors(self, texts):
+                raise httpx.ConnectError("Ollama is down")
+
+        rememberer = Rememberer(self.config, self.store, None, Down())
+        self.store.update_companion(self.her["id"], {"memory": "- They love rain"})
+        with self.assertLogs("app.remembering", "ERROR"):
+            kept = asyncio.run(rememberer.new_facts(self.store.companion(self.her["id"]), "you", ["They love rain."]))
+        self.assertEqual(kept, ["They love rain."])
+
     def test_a_fact_about_herself_goes_into_her_bio(self):
         rememberer = self.rememberer(lambda prompt: "Her favourite colour is lavender")
         saved = self.turn(rememberer, "", "what's yours?", "My favourite colour is lavender 💜")
@@ -190,6 +229,20 @@ class ConversationRemembersTests(unittest.TestCase):
         types = [e["type"] for e in events]
         self.assertLess(types.index("remembered"), types.index("done"))
         self.assertIn("- Their favourite food is pizza", self.store.companion(self.her["id"])["memory"])
+
+    def test_her_remember_tool_skips_a_fact_she_has_in_other_words(self):
+        self.store.update_companion(self.her["id"], {"memory": "- They have a cat named Mini"})
+        rememberer = Rememberer(self.config, self.store, None, FakeEmbedder())
+        transport, images = fake_services([], {})
+        conversation = Conversation(self.config, self.store, Ollama(self.config, transport),
+                                    ImageService(self.config, images), rememberer=rememberer)
+        calls = [{"function": {"name": "remember", "arguments": {"fact": "They have a cat named Mini."}}},
+                 {"function": {"name": "remember", "arguments": {"fact": "They work as a nurse"}}},
+                 {"function": {"name": "remember", "arguments": {"fact": "I am from Mumbai, 25.", "about": "me"}}}]
+        saved = asyncio.run(conversation.remember(self.her["id"], calls))
+        self.assertEqual(saved, [{"about": "them", "fact": "They work as a nurse"},
+                                 {"about": "me", "fact": "She is from Mumbai, 25."}])
+        self.assertEqual(self.store.companion(self.her["id"])["memory"].count("Mini"), 1)
 
     def test_a_photo_turn_is_left_to_the_vision_model(self):
         events = self.run_turn("Cute! 😍", "my favourite photo", photo=png("red"))

@@ -46,8 +46,19 @@ TASKS = {
     "her": "Decide whether the message states a new, lasting fact about the woman who wrote it, about herself",
 }
 SHIPPED_NEURONS = Path(__file__).with_name("remember_neurons.npz")
-# A written fact this close to a line she has (cosine of their embeddings) is the same fact.
+# A written fact this close to a line she has (cosine of their embeddings) is the same fact. Closeness alone is
+# blunt ("a cat named Mini" and "a dog named Mini" are 0.85 apart; "works as a nurse" and "her job is nursing"
+# only 0.68), so a near copy is the same at once, and a fact merely close to some lines is shown to her chat model
+# beside them, which says whether it is the same fact. Without the chat model, SAME_FACT decides.
 SAME_FACT = 0.8
+SURELY_SAME = 0.95
+MAYBE_SAME = 0.65
+JUDGED_LINES = 3
+SAME_PROMPT = """Do these two lines state the same fact, about the same person or thing? Different details (a cat
+and a dog, pizza and biryani, two different names) make them different facts; the same fact in other words is the
+same. Answer YES or NO only.
+A: {new}
+B: {known}"""
 CONTEXT_START = "(start of the chat)"
 
 # Her chat model writes the fact, or NONE. The examples' names are made up and never in a real chat: a fact
@@ -231,6 +242,73 @@ class Rememberer:
     def preload(self) -> None:
         self.embedder.preload()
 
+    async def known_vectors(self, companion: dict[str, Any], who: str) -> np.ndarray:
+        """What she has, embedded: her memory's lines reuse the vectors recall keeps for them, and the rest
+        (new lines, her bio's sentences) are embedded now."""
+        lines = known_lines(companion, who)
+        if not lines:
+            return np.zeros((0, 0), dtype=np.float32)
+        stored: dict[str, np.ndarray] = {}
+        if who == "you" and hasattr(self.store, "memory_lines"):
+            for row in await asyncio.to_thread(self.store.memory_lines, companion["id"]):
+                if row.get("embedded_by") == self.embedder.model and row.get("vector"):
+                    stored[row["line"]] = np.frombuffer(row["vector"], dtype=np.float32)
+        missing = [line for line in lines if line not in stored]
+        if missing:
+            for line, vector in zip(missing, await asyncio.to_thread(self.embedder.vectors, missing)):
+                stored[line] = vector
+        return np.stack([stored[line] for line in lines])
+
+    async def new_facts(self, companion: dict[str, Any], who: str, facts: list[str]) -> list[str]:
+        """The facts she does not have yet: each compared by meaning (cosine of embeddings) with her memory
+        (``who`` "you") or her bio ("her"), and with the facts before it in ``facts``. Every way she remembers
+        goes through here. If the embedding model cannot be reached, the facts are kept rather than lost."""
+        facts = [fact for fact in facts if fact.strip()]
+        if not facts:
+            return []
+        try:
+            known = await self.known_vectors(companion, who)
+            candidates = await asyncio.to_thread(self.embedder.vectors, [fact.removeprefix("- ").strip() for fact in facts])
+        except Exception:  # noqa: BLE001 - a duplicate is better than a lost fact
+            logger.exception("Could not compare new facts with what she has; keeping them")
+            return facts
+        pool = list(known) if known.size else []
+        texts = known_lines(companion, who) if known.size else []
+        kept = []
+        for fact, vector in zip(facts, candidates):
+            same = await self.same_as_known(fact, vector, pool, texts)
+            if same:
+                logger.info("Already known (%s): %s", same, fact)
+                continue
+            kept.append(fact)
+            pool.append(vector)
+            texts.append(fact.removeprefix("- ").strip())
+        return kept
+
+    async def same_as_known(self, fact: str, vector: np.ndarray, pool: list[np.ndarray], texts: list[str]) -> str:
+        """Why ``fact`` is one she has (a near copy, or the line her chat model said it repeats), or "" if new."""
+        if not pool:
+            return ""
+        scores = np.stack(pool) @ vector
+        order = np.argsort(-scores)
+        best = float(scores[order[0]])
+        if best >= SURELY_SAME:
+            return f"{best:.2f}"
+        close = [int(index) for index in order[:JUDGED_LINES] if scores[index] >= MAYBE_SAME]
+        if not close:
+            return ""
+        if self.complete is None:
+            return f"{best:.2f}" if best >= SAME_FACT else ""
+        try:
+            for index in close:
+                answer = await self.complete(SAME_PROMPT.format(new=fact.removeprefix("- ").strip(), known=texts[index]))
+                if answer.strip().upper().startswith("YES"):
+                    return f"{float(scores[index]):.2f}, same as {texts[index]!r}"
+        except Exception:  # noqa: BLE001 - closeness alone decides then
+            logger.exception("Could not ask whether a fact is one she has")
+            return f"{best:.2f}" if best >= SAME_FACT else ""
+        return ""
+
     async def write(self, who: str, before: str, text: str) -> str:
         quoted = f'Previous message: "{before[:200]}"\n' if before else ""
         prompt = (ABOUT_THEM if who == "you" else ABOUT_HER).format(before=quoted, text=text[:800])
@@ -261,13 +339,8 @@ class Rememberer:
             companion = await asyncio.to_thread(self.store.companion, companion_id)
             if companion is None:
                 return saved
-            lines = known_lines(companion, who)
-            if lines:
-                compare = await asyncio.to_thread(self.embedder.vectors, [fact, *lines])
-                closest = float((compare[1:] @ compare[0]).max())
-                if closest >= SAME_FACT:
-                    logger.info("Already known (%.2f): %s", closest, fact)
-                    continue
+            if not await self.new_facts(companion, who, [fact]):
+                continue
             if who == "you":
                 added = await asyncio.to_thread(self.store.remember, companion_id, fact, SociaConfig.MEMORY_CHARS)
             else:
