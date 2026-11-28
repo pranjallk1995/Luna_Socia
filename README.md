@@ -331,6 +331,104 @@ setting is described in `.env.example`.
 
 ## Data model
 
+### Database diagram
+
+The `lunasocia` database's tables (`public` schema: Socia is the owner's alone), drawn from the live database. Lines are foreign keys; `PK` marks primary keys, `FK` foreign keys, `UK` unique columns.
+
+```mermaid
+erDiagram
+    apps_connection {
+        bool singleton PK
+        text client_id
+        text client_secret
+        text redirect_uri
+        text access_token
+        text refresh_token
+        float8 access_expires
+        timestamptz connected_at
+    }
+    chats {
+        int8 id PK
+        text title
+        timestamptz created_at
+        timestamptz updated_at
+        int8 companion_id FK
+        text named
+        text notes
+        int8 remembered_to
+    }
+    companions {
+        int8 id PK
+        text name
+        jsonb persona
+        text voice
+        text memory
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    images {
+        int8 id PK
+        text kind
+        text file
+        text prompt
+        timestamptz created_at
+        int8 chat_id FK
+    }
+    memory_lines {
+        int8 companion_id PK, FK
+        text line PK
+        text kind
+        bytea vector
+        timestamptz_array recalls
+        text embedded_by
+    }
+    memory_sources {
+        int8 id PK
+        int8 companion_id FK, UK
+        text source UK
+        text external_id UK
+        text title
+        jsonb messages
+        timestamptz started_at
+        text facts
+        bool merged
+        timestamptz created_at
+    }
+    messages {
+        int8 id PK
+        text role
+        text content
+        int8 image_id FK
+        text photo_note
+        timestamptz created_at
+        int8 chat_id FK
+        text reaction
+        jsonb apps
+        timestamptz edited_at
+        jsonb remembered
+    }
+    owner_profile {
+        bool singleton PK
+        text name
+        text about
+        timestamptz updated_at
+    }
+    picture_references {
+        int8 companion_id FK
+        text reference
+        int8 image_id FK
+        timestamptz used_at
+    }
+    chats ||--o{ images : "chat_id"
+    chats ||--o{ messages : "chat_id"
+    images ||--o{ messages : "image_id"
+    companions ||--o{ memory_lines : "companion_id"
+    images ||--o{ picture_references : "image_id"
+    companions ||--o{ picture_references : "companion_id"
+    companions ||--o{ chats : "companion_id"
+    companions ||--o{ memory_sources : "companion_id"
+```
+
 The `luna_socia_data` volume holds each girlfriend's profile picture and avatar crop
 (`/data/companions/<id>`) and her other pictures (`/data/companions/<id>/references`, added
 and removed in her settings), the owner's picture and photos of themselves (`/data/owner`, from
