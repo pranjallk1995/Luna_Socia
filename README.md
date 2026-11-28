@@ -68,7 +68,7 @@ the owner only. Its models run on the home's one GPU, and she can act in every L
 ![Luna ecosystem architecture](docs/luna-ecosystem.svg)
 
 <!-- luna-models:start -->
-**Which app uses which model.** All of them run on Luna Sentia, which keeps Socia's chat model on the GPU and lets the others visit; see its [Models](https://github.com/pranjallk1995/Luna_Sentia#models) and [Changing a model](https://github.com/pranjallk1995/Luna_Sentia#changing-a-model).
+**Which app uses which model.** All of them run on Luna Sentia, which keeps Socia's chat model on the GPU and lets the others visit; see its [Models](https://github.com/pranjallk1995/Luna_Sentia/wiki/Architecture#models) and [Changing a model](https://github.com/pranjallk1995/Luna_Sentia/wiki/Architecture#changing-a-model).
 
 | Model | Served by | Used by | Before changing it |
 | --- | --- | --- | --- |
@@ -301,7 +301,7 @@ downloads the chat, vision and image models, which takes a while. Open
 <http://localhost:18503> and sign in as Sentia's owner with one click, then choose a
 girlfriend, or create one. To run your local code instead, use
 `./Luna_Sentia/luna.sh start --build socia`. Every option of `luna.sh` is in
-[Start everything](https://github.com/pranjallk1995/Luna_Sentia#start-everything).
+[Start everything](https://github.com/pranjallk1995/Luna_Sentia/wiki/Getting-Started#start-everything).
 
 <p align="center">
   <a href="https://github.com/pranjallk1995/Luna_Sentia/blob/main/assets/luna-sh-demo.mp4"><img src="https://raw.githubusercontent.com/pranjallk1995/Luna_Sentia/main/assets/luna-sh-demo.webp" alt="A terminal running luna.sh: starting Sentia and every app, showing one app's containers, stopping and starting Lumia alone, listing every app's containers, then watching Lumia while a saved file syncs and restarts its UI" width="900"></a>
@@ -454,7 +454,7 @@ scores her texting style, her language, whether she calls `create_image` when (a
 only when) a picture is asked for, and time. The chat model stays resident, so check
 that it fits with Luna Sentia's `model_checks/check_model.py <model> --context 8192`;
 the full list of checks is in Sentia's
-[Changing a model](https://github.com/pranjallk1995/Luna_Sentia#changing-a-model).
+[Changing a model](https://github.com/pranjallk1995/Luna_Sentia/wiki/Architecture#changing-a-model).
 Before changing `LUNASOCIA_VISION_MODEL`, play the cat game with both (her photos of three
 cats, then "who is this?"), run `model_evaluations/self_recognition.py` on photos of her and
 of women drawn to look like her, and check that it fits beside her voice and face models when
